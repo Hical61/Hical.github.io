@@ -7,11 +7,10 @@
     }
   ],
   "app": {
-    "threads_num": 4,
+    "threads_num": 2,
     "enable_session": false,
     "log": {
-      "log_path": "./logs",
-      "log_level": "DEBUG"
+      "log_level": "INFO"
     },
     "idle_connection_timeout": 60,
     "max_connection_num_per_ip": 50
