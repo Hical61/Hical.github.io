@@ -1,5 +1,6 @@
 // drogon-game-server/main.cc
-// 极简 Drogon 服务器（先验证云托管平台是否正常，再加游戏逻辑）
+// 游戏服务器入口：职场跑得快 1v1 PVP + 多人红A 4人联机
+// 使用代码配置（不依赖 config.json），日志输出到 stderr（云托管可捕获）
 
 #include <drogon/drogon.h>
 #include <iostream>
@@ -8,7 +9,7 @@ int main()
 {
     std::cout << "[drogon-game] Starting server on 0.0.0.0:8080" << std::endl;
 
-    // ── 健康检查路由（验证服务器正常运行）──
+    // ── 健康检查路由（云托管/负载均衡存活探测）──
     drogon::app().registerHandler(
         "/health",
         [](const drogon::HttpRequestPtr&,
@@ -37,14 +38,16 @@ int main()
         {drogon::Get}
     );
 
-    std::cout << "[drogon-game] Routes registered, starting listener..." << std::endl;
+    std::cout << "[drogon-game] Starting listener..." << std::endl;
+
+    // HttpController 和 WebSocketController 通过静态初始化自动注册路由
+    // 无需手动注册，只要对应 .cc 文件被链接进来即可（CMakeLists.txt 的 GLOB_RECURSE 保证）
 
     drogon::app()
         .addListener("0.0.0.0", 8080)
-        .setThreadNum(2)
-        .setLogLevel(trantor::Logger::kDebug)
-        // 日志输出到 stderr（云托管可捕获）
-        .setLogPath("")
+        .setThreadNum(4)
+        .setLogLevel(trantor::Logger::kInfo)
+        .setLogPath("")   // 输出到 stderr，方便云托管日志查看
         .run();
 
     return 0;

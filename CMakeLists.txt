@@ -4,28 +4,30 @@ project(drogon-game-server CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# ── vcpkg 工具链集成（Drogon 安装在 C:/vcpkg）──────────────────────────
-if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
-endif()
-if(EXISTS "C:/vcpkg/scripts/buildsystems/vcpkg.cmake" AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "C:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+# ── vcpkg 工具链（仅 Windows 本地开发需要，Linux Docker 环境中忽略）──
+if(WIN32)
+    if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+        set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+    endif()
+    if(EXISTS "C:/vcpkg/scripts/buildsystems/vcpkg.cmake" AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+        set(CMAKE_TOOLCHAIN_FILE "C:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+    endif()
 endif()
 
-# ── 依赖：Drogon ──────────────────────────────────────────────────────────
+# ── 依赖：Drogon（在 drogonframework/drogon Docker 镜像中已预装）──
 find_package(Drogon REQUIRED)
 
-# ── 第一阶段：极简服务器（仅 main.cc，验证平台是否正常）──────────────────
-# 确认云托管可以运行后，改为 PHASE2=ON 启用完整游戏逻辑
-option(PHASE2_FULL_GAME "Enable full game logic (Poker + REDA)" OFF)
+# ── 编译阶段控制 ──
+# 默认只编译 main.cc（极简验证模式）
+# 加上 -DPHASE2_FULL_GAME=ON 启用完整游戏逻辑
+option(PHASE2_FULL_GAME "Enable full game logic (Poker + REDA)" ON)
 
 if(PHASE2_FULL_GAME)
-    # 完整游戏逻辑
     file(GLOB_RECURSE GAME_SOURCES "src/*.cc" "src/*.cpp")
     add_executable(${PROJECT_NAME} main.cc ${GAME_SOURCES})
     target_include_directories(${PROJECT_NAME} PRIVATE src/ src/common/ src/poker/ src/reda/)
 else()
-    # 极简：只有 main.cc
+    # 极简模式：只有 main.cc
     add_executable(${PROJECT_NAME} main.cc)
 endif()
 
