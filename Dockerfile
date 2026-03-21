@@ -6,7 +6,7 @@
 # 注意：使用固定版本 tag（非 latest）确保构建可复现
 
 # ── Stage 1: 编译阶段 ────────────────────────────────────────────
-FROM drogonframework/drogon:v1.9.6 AS builder
+FROM drogonframework/drogon:latest AS builder
 
 WORKDIR /app
 
