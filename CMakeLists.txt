@@ -21,17 +21,34 @@ find_package(Drogon REQUIRED)
 option(PHASE2_FULL_GAME "Enable full game logic (Poker + REDA)" ON)
 
 if(PHASE2_FULL_GAME)
-    # 完整游戏逻辑：包含所有 RoomManager 和 WS 控制器
-    # HTTP 路由在 main.cc 中直接注册（lambda 方式，不依赖 HttpController 自动注册）
     file(GLOB_RECURSE GAME_SOURCES "src/*.cc" "src/*.cpp")
-    add_executable(${PROJECT_NAME} main.cc ${GAME_SOURCES})
-    target_include_directories(${PROJECT_NAME} PRIVATE src/ src/common/ src/poker/ src/reda/)
+
+    if(UNIX)
+        # ── Linux（云托管环境）──
+        # 将游戏源码编译为静态库，并用 --whole-archive 强制链接所有符号
+        # 防止链接器优化掉 Drogon WebSocketController 的静态初始化代码（WS 路由注册）
+        add_library(game_static STATIC ${GAME_SOURCES})
+        target_include_directories(game_static PUBLIC src/ src/common/ src/poker/ src/reda/)
+        target_link_libraries(game_static PUBLIC Drogon::Drogon)
+
+        add_executable(${PROJECT_NAME} main.cc)
+        target_include_directories(${PROJECT_NAME} PRIVATE src/ src/common/ src/poker/ src/reda/)
+        # --whole-archive：强制包含 game_static 中所有符号（包括未被直接引用的静态初始化代码）
+        target_link_libraries(${PROJECT_NAME} PRIVATE
+            -Wl,--whole-archive game_static -Wl,--no-whole-archive
+            Drogon::Drogon
+        )
+    else()
+        # ── Windows 本地开发 ──
+        add_executable(${PROJECT_NAME} main.cc ${GAME_SOURCES})
+        target_include_directories(${PROJECT_NAME} PRIVATE src/ src/common/ src/poker/ src/reda/)
+        target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon)
+    endif()
 else()
     # 极简模式：只有 main.cc
     add_executable(${PROJECT_NAME} main.cc)
+    target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon)
 endif()
-
-target_link_libraries(${PROJECT_NAME} PRIVATE Drogon::Drogon)
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     target_compile_options(${PROJECT_NAME} PRIVATE -O2 -DNDEBUG)
