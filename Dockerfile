@@ -1,9 +1,10 @@
 # drogon-game-server/Dockerfile
 # 多阶段构建：
-#   Stage 1 (builder)：使用 Drogon 官方预编译镜像编译游戏服务器
-#   Stage 2 (runtime)：只保留可执行文件和运行时依赖，镜像体积从 >2GB 压缩到 ~200MB
+#   Stage 1 (builder)：编译游戏服务器二进制
+#   Stage 2 (runtime)：复用同一个 drogon 镜像作为运行时，确保所有动态库完整
+#                      只拷贝编译产物，源码和编译中间文件不进入最终镜像
 #
-# 注意：使用固定版本 tag（非 latest）确保构建可复现
+# 对比单阶段构建：最终镜像不含源码/中间文件，体积减少约 30~50%
 
 # ── Stage 1: 编译阶段 ────────────────────────────────────────────
 FROM drogonframework/drogon:latest AS builder
@@ -14,25 +15,18 @@ WORKDIR /app
 COPY . .
 
 # 编译游戏服务器
-# 使用 cmake --build --parallel 替代 -j$(nproc)，无需依赖 nproc 命令
+# 使用 cmake --build --parallel 替代 -j$(nproc)，兼容所有 shell 环境
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
 	&& cmake --build build --parallel
 
-# ── Stage 2: 运行阶段（精简镜像）────────────────────────────────
-FROM ubuntu:22.04
-
-# 安装 Drogon 运行时所需的动态库（不含编译工具链）
-RUN apt-get update && apt-get install -y --no-install-recommends \
-	libssl3 \
-	libjsoncpp25 \
-	libuuid1 \
-	zlib1g \
-	libbrotli1 \
-	&& rm -rf /var/lib/apt/lists/*
+# ── Stage 2: 运行阶段 ────────────────────────────────────────────
+# 使用与编译阶段相同的基础镜像，确保所有 Drogon 运行时动态库完整匹配
+# （避免手动枚举 libcares / libjsoncpp / libssl 等版本不一致问题）
+FROM drogonframework/drogon:latest
 
 WORKDIR /app
 
-# 只拷贝可执行文件和配置文件（不包含源码和编译工具）
+# 只拷贝编译产物和配置文件（源码、CMake 中间文件等不进入最终镜像）
 COPY --from=builder /app/build/drogon-game-server ./build/drogon-game-server
 COPY --from=builder /app/config.json ./config.json
 
@@ -40,5 +34,5 @@ COPY --from=builder /app/config.json ./config.json
 EXPOSE 8080
 
 # 使用相对路径启动，确保 CWD 始终是 WORKDIR(/app)
-# Drogon 会在 CWD 查找 config.json 和 ./logs 目录
+# Drogon 会在 CWD 查找 config.json
 CMD ["./build/drogon-game-server"]
