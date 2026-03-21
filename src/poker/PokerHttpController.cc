@@ -73,7 +73,13 @@ void PokerHttpController::joinRoom(
     resp["success"]  = res.ok;
     resp["token"]    = res.token;
     resp["roomCode"] = roomCode;
-    if (!res.ok) resp["errMsg"] = res.errMsg;
+    if (!res.ok) {
+        resp["errMsg"] = res.errMsg;
+    } else {
+        // BUG FIX: 将加入后的完整 players 列表写入 HTTP 响应，
+        // 客户端收到后可立即渲染双侧玩家槽，无需等待 WS room_update 的异步推送
+        resp["players"] = res.players;   // [房主, 新加入者]
+    }
     cb(jsonResp(resp));
 }
 

@@ -1,38 +1,44 @@
 # drogon-game-server/Dockerfile
-# 单阶段构建（避免多阶段运行时库缺失问题）
-# 适用于微信云托管（CloudBase Run）
+# 多阶段构建：
+#   Stage 1 (builder)：使用 Drogon 官方预编译镜像编译游戏服务器
+#   Stage 2 (runtime)：只保留可执行文件和运行时依赖，镜像体积从 >2GB 压缩到 ~200MB
+#
+# 注意：使用固定版本 tag（非 latest）确保构建可复现
 
-FROM ubuntu:22.04
+# ── Stage 1: 编译阶段 ────────────────────────────────────────────
+FROM drogonframework/drogon:v1.9.6 AS builder
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# ── 安装所有依赖（编译 + 运行时）──
-RUN apt-get update && apt-get install -y \
-	cmake g++ git pkg-config \
-	libssl-dev libjsoncpp-dev uuid-dev \
-	zlib1g-dev libbrotli-dev \
-	&& rm -rf /var/lib/apt/lists/*
-
-# ── 编译安装 Drogon ──
-RUN git clone --depth=1 https://github.com/drogonframework/drogon /drogon \
-	&& cd /drogon \
-	&& git submodule update --init --recursive \
-	&& cmake -B build \
-	-DCMAKE_BUILD_TYPE=Release \
-	-DBUILD_EXAMPLES=OFF \
-	-DBUILD_TESTING=OFF \
-	&& cmake --build build --target install -j$(nproc) \
-	&& rm -rf /drogon
-
-# ── 复制源码并编译游戏服务器 ──
 WORKDIR /app
+
+# 复制源码
 COPY . .
 
+# 编译游戏服务器
+# 使用 cmake --build --parallel 替代 -j$(nproc)，无需依赖 nproc 命令
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
-	&& cmake --build build -j$(nproc)
+	&& cmake --build build --parallel
 
-# 云托管默认端口 8080
+# ── Stage 2: 运行阶段（精简镜像）────────────────────────────────
+FROM ubuntu:22.04
+
+# 安装 Drogon 运行时所需的动态库（不含编译工具链）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	libssl3 \
+	libjsoncpp25 \
+	libuuid1 \
+	zlib1g \
+	libbrotli1 \
+	&& rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 只拷贝可执行文件和配置文件（不包含源码和编译工具）
+COPY --from=builder /app/build/drogon-game-server ./build/drogon-game-server
+COPY --from=builder /app/config.json ./config.json
+
+# 云托管默认端口 8080（与 config.json 中 port 一致）
 EXPOSE 8080
 
-# 使用绝对路径启动，避免工作目录问题
-CMD ["/app/build/drogon-game-server"]
+# 使用相对路径启动，确保 CWD 始终是 WORKDIR(/app)
+# Drogon 会在 CWD 查找 config.json 和 ./logs 目录
+CMD ["./build/drogon-game-server"]

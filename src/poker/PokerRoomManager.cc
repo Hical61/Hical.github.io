@@ -175,11 +175,9 @@ PokerRoomManager::JoinResult PokerRoomManager::joinRoom(
     p.isCreator = false;
     room.players.push_back(p);
 
-    // 广播 room_update
-    Json::Value msg;
-    msg["type"] = "room_update";
-    Json::Value d;
-    d["status"] = "waiting";
+    // 构建完整玩家列表 JSON（含房主+新加入者），供 WS 广播和 HTTP 响应共用
+    // BUG FIX: 在 joinRoom 返回值中携带 players，使 HTTP 响应即可携带完整列表，
+    //          客户端无需等待 WS room_update（消除好友端初始显示空槽的竞态窗口）
     Json::Value ps(Json::arrayValue);
     for (auto& pl : room.players) {
         Json::Value pj;
@@ -188,13 +186,20 @@ PokerRoomManager::JoinResult PokerRoomManager::joinRoom(
         pj["avatar"]    = pl.avatar;
         pj["roleId"]    = pl.roleId;
         pj["isCreator"] = pl.isCreator;
+        pj["connected"] = pl.connected;
         ps.append(pj);
     }
+
+    // 广播 room_update（通知房主有人加入）
+    Json::Value msg;
+    msg["type"] = "room_update";
+    Json::Value d;
+    d["status"]  = "waiting";
     d["players"] = ps;
     msg["data"]  = d;
     _broadcast(room, msg);
 
-    return { true, token, "" };
+    return { true, token, "", ps };   // players 字段供 HTTP Controller 写入响应
 }
 
 PokerRoomManager::LeaveResult PokerRoomManager::leaveRoom(
