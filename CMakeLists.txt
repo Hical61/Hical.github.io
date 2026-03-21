@@ -18,11 +18,11 @@ endif()
 find_package(Drogon REQUIRED)
 
 # ── 编译阶段控制 ──
-# 默认只编译 main.cc（极简验证模式）
-# 加上 -DPHASE2_FULL_GAME=ON 启用完整游戏逻辑
 option(PHASE2_FULL_GAME "Enable full game logic (Poker + REDA)" ON)
 
 if(PHASE2_FULL_GAME)
+    # 完整游戏逻辑：包含所有 RoomManager 和 WS 控制器
+    # HTTP 路由在 main.cc 中直接注册（lambda 方式，不依赖 HttpController 自动注册）
     file(GLOB_RECURSE GAME_SOURCES "src/*.cc" "src/*.cpp")
     add_executable(${PROJECT_NAME} main.cc ${GAME_SOURCES})
     target_include_directories(${PROJECT_NAME} PRIVATE src/ src/common/ src/poker/ src/reda/)
