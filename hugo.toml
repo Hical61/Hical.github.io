@@ -1,0 +1,25 @@
+baseURL = 'https://hicalio.cn/'
+languageCode = 'zh-cn'
+title = 'Hical 的技术成长日记'
+theme = 'PaperMod'
+
+# === 核心参数配置 ===
+[params]
+  defaultTheme = "dark" # 默认黑夜模式 (用户依然可以点击右上角太阳/月亮切换)
+  
+# === 搜索功能引擎配置 ===
+# 告诉 Hugo 编译时不仅生成网页，还要生成一个包含所有文章内容的 JSON 索引文件
+[outputs]
+  home = ["HTML", "RSS", "JSON"]
+
+# === 顶部导航菜单 ===
+[[menu.main]]
+  name = "🏠 主页"
+  url = "/"
+  weight = 10
+
+[[menu.main]]
+  name = "🔍 搜索"
+  url = "/search/"
+  weight = 20
+

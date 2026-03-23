@@ -1,0 +1,55 @@
+name: Deploy Hugo site to Pages
+
+on:
+  push:
+    branches: ["master"] # 监听咱们的 master 分支
+  workflow_dispatch:     # 允许你在网页上手动点按钮触发部署
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码 (Checkout)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive # 关键：递归拉取 PaperMod 主题
+          fetch-depth: 0
+
+      - name: 安装 Hugo (Setup Hugo)
+        uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: 'latest'
+          extended: true      # 关键：必须用 extended 版本编译主题
+
+      - name: 编译生成网页 (Build)
+        run: hugo --minify    # 开启代码压缩，访问速度更快
+
+      - name: 上传打包文件 (Upload artifact)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: 部署到 GitHub Pages (Deploy)
+        id: deploy
+        uses: actions/deploy-pages@v4
+
