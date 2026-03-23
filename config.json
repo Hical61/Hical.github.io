@@ -12,7 +12,7 @@
     "log": {
       "log_level": "INFO"
     },
-    "idle_connection_timeout": 60,
+    "idle_connection_timeout": 300,
     "max_connection_num_per_ip": 50
   },
   "db_clients": []
