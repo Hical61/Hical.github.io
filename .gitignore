@@ -1,0 +1,14 @@
+# Hugo 构建输出目录（由 CI/CD 自动生成，无需提交）
+public/
+
+# Hugo 构建锁文件
+.hugo_build.lock
+
+# 操作系统生成的文件
+.DS_Store
+Thumbs.db
+
+# 编辑器临时文件
+.vscode/
+*.swp
+*.swo

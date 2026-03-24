@@ -2,14 +2,15 @@
 <html lang="zh-CN" data-theme="dark">
 
 <head>
-	<meta name="generator" content="Hugo 0.158.0"><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<meta name="description" content="Hical · C++ 开发 · 冰川网络远征Online服务器组 · 个人数字名片">
 	<title>Hical</title>
 	<link rel="icon" href="/avatar.png">
 	<style>
-		 
+		/* ==========================================
+           赛博朋克核心变量
+        ========================================== */
 		:root {
 			--cyan: #00f5ff;
 			--magenta: #ff00ff;
@@ -43,7 +44,9 @@
 			overflow: hidden;
 		}
 
-		 
+		/* ==========================================
+           固定层：粒子 Canvas（最底层）
+        ========================================== */
 		#bgCanvas {
 			position: fixed;
 			inset: 0;
@@ -51,7 +54,9 @@
 			pointer-events: none;
 		}
 
-		 
+		/* ==========================================
+           固定层：Three.js 3D 地球
+        ========================================== */
 		#earthCanvas {
 			position: fixed;
 			inset: 0;
@@ -59,7 +64,9 @@
 			pointer-events: none;
 		}
 
-		 
+		/* ==========================================
+           扫描线
+        ========================================== */
 		.scanlines {
 			position: fixed;
 			inset: 0;
@@ -71,7 +78,7 @@
 					rgba(0, 245, 255, 0.015) 4px);
 		}
 
-		 
+		/* Glitch 竖线 */
 		.glitch-line {
 			position: fixed;
 			inset: 0;
@@ -112,7 +119,9 @@
 			}
 		}
 
-		 
+		/* ==========================================
+           顶部状态栏
+        ========================================== */
 		.status-bar {
 			position: fixed;
 			top: 0;
@@ -152,7 +161,9 @@
 			animation: blink 1.1s step-end infinite;
 		}
 
-		 
+		/* ==========================================
+           右下坐标提示
+        ========================================== */
 		.globe-hint {
 			position: fixed;
 			bottom: 16px;
@@ -166,11 +177,13 @@
 			pointer-events: none;
 		}
 
-		 
+		/* ==========================================
+           主滚动容器（z-index 上层，覆盖画布）
+        ========================================== */
 		.page-wrap {
 			position: fixed;
 			inset: 30px 0 0 0;
-			 
+			/* 顶部留出 status-bar 高度 */
 			z-index: 10;
 			overflow-y: auto;
 			overflow-x: hidden;
@@ -180,7 +193,7 @@
 			padding: 28px 16px 32px;
 		}
 
-		 
+		/* 顶部导航 */
 		.top-nav {
 			width: 100%;
 			max-width: 920px;
@@ -200,7 +213,9 @@
 			letter-spacing: 3px;
 		}
 
-		 
+		/* ==========================================
+           名片主体
+        ========================================== */
 		.card {
 			width: 100%;
 			max-width: 920px;
@@ -213,7 +228,7 @@
 			flex-shrink: 0;
 		}
 
-		 
+		/* 四角装饰 */
 		.card::before,
 		.card::after,
 		.card .c-tr,
@@ -254,7 +269,7 @@
 			border-width: 0 0 2px 2px;
 		}
 
-		 
+		/* 标题栏 */
 		.card-header {
 			background: rgba(0, 245, 255, 0.04);
 			border-bottom: 1px solid var(--border);
@@ -294,7 +309,7 @@
 			letter-spacing: 2px;
 		}
 
-		 
+		/* 主体双列 */
 		.card-body {
 			display: grid;
 			grid-template-columns: 1fr 1fr;
@@ -306,7 +321,7 @@
 			}
 		}
 
-		 
+		/* 左侧 */
 		.col-left {
 			padding: 24px 26px;
 			border-right: 1px solid var(--border);
@@ -322,7 +337,7 @@
 			}
 		}
 
-		 
+		/* 头像区 */
 		.avatar-wrap {
 			display: flex;
 			align-items: center;
@@ -410,7 +425,7 @@
 			box-shadow: var(--glow-m);
 		}
 
-		 
+		/* 分割线 */
 		.divider {
 			border: none;
 			height: 1px;
@@ -418,7 +433,7 @@
 			opacity: .25;
 		}
 
-		 
+		/* 终端块 */
 		.terminal {
 			background: rgba(0, 0, 0, .45);
 			border: 1px solid rgba(0, 245, 255, .12);
@@ -447,7 +462,7 @@
 			animation: blink .85s step-end infinite;
 		}
 
-		 
+		/* 信息列表 */
 		.info-list {
 			display: flex;
 			flex-direction: column;
@@ -484,7 +499,7 @@
 			opacity: .7;
 		}
 
-		 
+		/* 右侧 */
 		.col-right {
 			padding: 24px 26px;
 			display: flex;
@@ -492,7 +507,7 @@
 			gap: 16px;
 		}
 
-		 
+		/* 小节标题 */
 		.sec-title {
 			font-size: 10px;
 			letter-spacing: 3px;
@@ -512,7 +527,7 @@
 			opacity: .28;
 		}
 
-		 
+		/* 技能条 */
 		.skill-list {
 			display: flex;
 			flex-direction: column;
@@ -557,7 +572,7 @@
 			transition: width 1.6s cubic-bezier(.4, 0, .2, 1);
 		}
 
-		 
+		/* 标签云 */
 		.tags {
 			display: flex;
 			flex-wrap: wrap;
@@ -619,7 +634,7 @@
 			background: rgba(255, 255, 0, .07);
 		}
 
-		 
+		/* 状态网格 */
 		.status-grid {
 			display: grid;
 			grid-template-columns: 1fr 1fr;
@@ -653,7 +668,7 @@
 			text-shadow: var(--glow-m);
 		}
 
-		 
+		/* 底部操作栏 */
 		.card-footer {
 			border-top: 1px solid var(--border);
 			padding: 12px 22px;
@@ -713,7 +728,7 @@
 			box-shadow: var(--glow-m);
 		}
 
-		 
+		/* 底部版权 */
 		.page-footer {
 			margin-top: 14px;
 			font-size: 10px;
@@ -736,39 +751,39 @@
 
 <body>
 
-	
+	<!-- 背景画布 -->
 	<canvas id="bgCanvas" aria-hidden="true"></canvas>
 	<canvas id="earthCanvas" aria-hidden="true"></canvas>
 	<div class="scanlines" aria-hidden="true"></div>
 	<div class="glitch-line" aria-hidden="true"></div>
 
-	
+	<!-- 顶部状态栏 -->
 	<div class="status-bar" role="status">
 		<span>SYS://HICAL_NODE_01 &nbsp;|&nbsp; OS: <span class="online">ONLINE</span></span>
 		<span id="sysTime"></span>
 		<span>NET: <span class="online">CONNECTED</span> &nbsp;<span class="blink">▮</span></span>
 	</div>
 
-	
+	<!-- 右下坐标 -->
 	<div class="globe-hint" aria-hidden="true">
 		<div>// 3D EARTH ROTATING</div>
 		<div id="coordTxt">LAT: 30.67° N / LNG: 104.06° E</div>
 	</div>
 
-	
+	<!-- 主滚动区 -->
 	<div class="page-wrap">
 
-		
+		<!-- 顶部导航 -->
 		<nav class="top-nav" aria-label="主导航">
 			<a href="/" class="nav-brand">HICAL</a>
 		</nav>
 
-		
+		<!-- 名片 -->
 		<main class="card" role="main">
 			<div class="c-tr" aria-hidden="true"></div>
 			<div class="c-bl" aria-hidden="true"></div>
 
-			
+			<!-- 标题栏 -->
 			<div class="card-header">
 				<div class="dot dot-r"></div>
 				<div class="dot dot-y"></div>
@@ -777,13 +792,13 @@
 				<span style="margin-left:auto;font-size:10px;opacity:.35;">CYBER_PROFILE.EXE</span>
 			</div>
 
-			
+			<!-- 主体 -->
 			<div class="card-body">
 
-				
+				<!-- 左侧：身份 -->
 				<div class="col-left">
 
-					
+					<!-- 头像 + 名字 -->
 					<div class="avatar-wrap">
 						<div class="avatar-frame">
 							<img src="/avatar.jpg" alt="Hical 头像"
@@ -799,7 +814,7 @@
 
 					<hr class="divider">
 
-					
+					<!-- 终端动画 -->
 					<div class="terminal" aria-live="polite">
 						<div>
 							<span class="t-prompt">hical@server:~$ </span><span id="termCmd"></span><span
@@ -810,7 +825,7 @@
 
 					<hr class="divider">
 
-					
+					<!-- 联系信息 -->
 					<address class="info-list" style="font-style:normal;">
 						<div class="info-row">
 							<span class="info-lbl">// ORG</span>
@@ -843,10 +858,10 @@
 
 				</div>
 
-				
+				<!-- 右侧：技能 & 状态 -->
 				<div class="col-right">
 
-					
+					<!-- 技能条 -->
 					<div>
 						<div class="sec-title">SKILL_MATRIX</div>
 						<div class="skill-list">
@@ -897,7 +912,7 @@
 
 					<hr class="divider">
 
-					
+					<!-- 技术标签 -->
 					<div>
 						<div class="sec-title">TECH_TAGS</div>
 						<div class="tags">
@@ -921,7 +936,7 @@
 
 					<hr class="divider">
 
-					
+					<!-- 状态网格 -->
 					<div>
 						<div class="sec-title">NODE_STATUS</div>
 						<div class="status-grid">
@@ -947,7 +962,7 @@
 				</div>
 			</div>
 
-			
+			<!-- 底部 -->
 			<div class="card-footer">
 				<span class="footer-sig">// Talk is cheap. Show me the code. ☕</span>
 				<div class="btn-group">
@@ -958,18 +973,19 @@
 		</main>
 
 		<footer class="page-footer">
-			© 2026 Hical &nbsp;·&nbsp; Powered by <a href="https://gohugo.io/" target="_blank"
+			© {{ now.Year }} Hical &nbsp;·&nbsp; Powered by <a href="https://gohugo.io/" target="_blank"
 				rel="noopener">Hugo</a> &amp; <a href="https://github.com/adityatelange/hugo-PaperMod" target="_blank"
 				rel="noopener">PaperMod</a>
 		</footer>
 
-	</div>
+	</div><!-- /page-wrap -->
 
-	
+	<!-- Three.js -->
 	<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 	<script>
-		
-
+		/* ==========================================
+		   系统时钟
+		========================================== */
 		function tick() {
 			var n = new Date();
 			var p = function (v) { return String(v).padStart(2, '0'); };
@@ -981,14 +997,16 @@
 		}
 		tick();
 
-		
-
+		/* ==========================================
+		   运行天数
+		========================================== */
 		var days = Math.floor((Date.now() - new Date('2023-01-01')) / 86400000);
 		var upEl = document.getElementById('uptimeVal');
 		if (upEl) upEl.textContent = days + 'd';
 
-		
-
+		/* ==========================================
+		   Bug 计数器
+		========================================== */
 		var bugN = 9527;
 		function bugTick() {
 			bugN += Math.floor(Math.random() * 3);
@@ -998,8 +1016,9 @@
 		}
 		bugTick();
 
-		
-
+		/* ==========================================
+		   终端打字动画
+		========================================== */
 		var tLines = [
 			{ cmd: 'whoami', out: '>> C++ 开发 · 远征Online服务器组' },
 			{ cmd: 'uname -a', out: '>> Linux GameServer 6.1.0-cyber' },
@@ -1030,8 +1049,9 @@
 		}
 		setTimeout(termTick, 600);
 
-		
-
+		/* ==========================================
+		   技能条入场动画
+		========================================== */
 		function animBars() {
 			document.querySelectorAll('.bar-fill').forEach(function (b) {
 				setTimeout(function () { b.style.width = b.dataset.w + '%'; }, 200);
@@ -1049,8 +1069,9 @@
 			setTimeout(animBars, 500);
 		}
 
-		
-
+		/* ==========================================
+		   粒子背景（2D Canvas）
+		========================================== */
 		(function () {
 			var c = document.getElementById('bgCanvas');
 			if (!c) return;
@@ -1078,12 +1099,12 @@
 
 			function draw() {
 				ctx.clearRect(0, 0, W, H);
-				
+				// grid
 				ctx.strokeStyle = 'rgba(0,245,255,0.032)';
 				ctx.lineWidth = 1;
 				for (var x = 0; x < W; x += 60) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
 				for (var y = 0; y < H; y += 60) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
-				
+				// particles
 				parts.forEach(function (p) {
 					p.x += p.vx; p.y += p.vy;
 					if (p.x < 0 || p.x > W || p.y < 0 || p.y > H) p.reset();
@@ -1092,7 +1113,7 @@
 					ctx.fillStyle = 'rgba(' + p.col + ',' + p.a + ')';
 					ctx.fill();
 				});
-				
+				// connections
 				for (var a = 0; a < parts.length; a++) {
 					for (var b = a + 1; b < parts.length; b++) {
 						var dx = parts[a].x - parts[b].x, dy = parts[a].y - parts[b].y;
@@ -1112,8 +1133,9 @@
 			draw();
 		})();
 
-		
-
+		/* ==========================================
+		   Three.js 3D 悬浮地球
+		========================================== */
 		(function () {
 			if (typeof THREE === 'undefined') return;
 			var ec = document.getElementById('earthCanvas');
@@ -1135,17 +1157,17 @@
 			window.addEventListener('resize', resize);
 			resize();
 
-			
+			// wireframe 球
 			var eGeo = new THREE.SphereGeometry(1, 36, 24);
 			var eMat = new THREE.MeshBasicMaterial({ color: 0x00f5ff, wireframe: true, transparent: true, opacity: .07 });
 			var eMesh = new THREE.Mesh(eGeo, eMat);
 
-			
+			// 实心球
 			var sGeo = new THREE.SphereGeometry(.98, 64, 64);
 			var sMat = new THREE.MeshPhongMaterial({ color: 0x020a14, emissive: 0x001a2e, transparent: true, opacity: .8, shininess: 80 });
 			var sMesh = new THREE.Mesh(sGeo, sMat);
 
-			
+			// 光晕
 			var gGeo = new THREE.SphereGeometry(1.13, 32, 32);
 			var gMat = new THREE.MeshBasicMaterial({ color: 0x00f5ff, transparent: true, opacity: .04, side: THREE.BackSide });
 			var gMesh = new THREE.Mesh(gGeo, gMat);
@@ -1154,13 +1176,13 @@
 			var hMat = new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: .015, side: THREE.BackSide });
 			var hMesh = new THREE.Mesh(hGeo, hMat);
 
-			
+			// 赤道
 			var eqPts = [];
 			for (var i = 0; i <= 128; i++) { var a = (i / 128) * Math.PI * 2; eqPts.push(new THREE.Vector3(Math.cos(a), 0, Math.sin(a))); }
 			var eqL = new THREE.Line(new THREE.BufferGeometry().setFromPoints(eqPts),
 				new THREE.LineBasicMaterial({ color: 0x00f5ff, transparent: true, opacity: .4 }));
 
-			
+			// 经线
 			function mer(ry, col, op) {
 				var pts = [];
 				for (var i = 0; i <= 128; i++) { var a = (i / 128) * Math.PI * 2; pts.push(new THREE.Vector3(Math.sin(a), Math.cos(a), 0)); }
@@ -1170,7 +1192,7 @@
 			}
 			var m1 = mer(0, 0x00f5ff, .35), m2 = mer(Math.PI / 3, 0xff00ff, .18), m3 = mer(Math.PI * 2 / 3, 0x00f5ff, .12);
 
-			
+			// 成都标记
 			var dG = new THREE.SphereGeometry(.025, 8, 8);
 			var dM = new THREE.MeshBasicMaterial({ color: 0xff00ff });
 			var dMesh = new THREE.Mesh(dG, dM);
@@ -1183,7 +1205,7 @@
 			rMesh.position.copy(dMesh.position);
 			rMesh.lookAt(new THREE.Vector3(0, 0, 0));
 
-			
+			// 粒子云
 			var pN = 280, pPos = new Float32Array(pN * 3);
 			for (var i = 0; i < pN; i++) {
 				var r2 = 1.5 + Math.random() * .8;
@@ -1197,16 +1219,16 @@
 			pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
 			var pMesh = new THREE.Points(pGeo, new THREE.PointsMaterial({ color: 0x00f5ff, size: .013, transparent: true, opacity: .5 }));
 
-			
+			// 光源
 			scene.add(new THREE.AmbientLight(0xffffff, .3));
 			var dl = new THREE.DirectionalLight(0x00f5ff, 1.2); dl.position.set(5, 3, 5); scene.add(dl);
 			var rl = new THREE.DirectionalLight(0xff00ff, .35); rl.position.set(-5, -2, -3); scene.add(rl);
 
-			
+			// 地球组
 			var globe = new THREE.Group();
 			globe.add(sMesh, eMesh, gMesh, hMesh, eqL, m1, m2, m3, dMesh, rMesh, pMesh);
 
-			
+			// PC 端地球偏右显示
 			function posGlobe() {
 				globe.position.set(window.innerWidth > 640 ? 0.55 : 0, 0, 0);
 			}
@@ -1214,14 +1236,14 @@
 			window.addEventListener('resize', posGlobe);
 			scene.add(globe);
 
-			
+			// 鼠标跟随
 			var mX = 0, mY = 0;
 			document.addEventListener('mousemove', function (e) {
 				mX = (e.clientX / window.innerWidth - .5) * 2;
 				mY = (e.clientY / window.innerHeight - .5) * 2;
 			});
 
-			
+			// 坐标更新
 			var angle = 0;
 			function updateCoord() {
 				angle += .003;

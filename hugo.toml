@@ -1,25 +1,63 @@
 baseURL = 'https://hicalio.cn/'
 languageCode = 'zh-cn'
-title = 'Hical 的技术成长日记'
+title = 'Hical'
 theme = 'PaperMod'
 
-# === 核心参数配置 ===
-[params]
-  defaultTheme = "dark" # 默认黑夜模式 (用户依然可以点击右上角太阳/月亮切换)
-  
-# === 搜索功能引擎配置 ===
-# 告诉 Hugo 编译时不仅生成网页，还要生成一个包含所有文章内容的 JSON 索引文件
+# 分页设置：每页显示几篇文章
+paginate = 8 
+
+# 开启 JSON 索引（为了搜索功能）
 [outputs]
   home = ["HTML", "RSS", "JSON"]
 
-# === 顶部导航菜单 ===
+# ==========================================
+# 极客专属代码高亮设置 (核心服务器开发必备)
+# ==========================================
+[markup.highlight]
+  noClasses = false
+  guessSyntax = true     # 自动猜测代码语言
+  lineNos = true         # 显示代码行号！(极其实用)
+  style = "monokai"      # 极客最爱的暗黑代码高亮风格
+
+# ==========================================
+# PaperMod 核心功能开关 (大满配)
+# ==========================================
+[params]
+  defaultTheme = "dark"        # 默认黑夜模式
+  ShowReadingTime = true       # 显示阅读预计时间
+  ShowWordCount = true         # 显示文章字数
+  ShowShareButtons = true      # 在文章底部显示分享按钮（推特、脸书等）
+  ShowPostNavLinks = true      # 文章底部显示“上一篇/下一篇”
+  ShowBreadCrumbs = true       # 在文章顶部显示面包屑导航 (主页 > 文章 > XXX)
+  ShowCodeCopyButtons = true   # 为所有代码块添加“一键复制”按钮！(极力推荐)
+  ShowToc = true               # 开启文章目录 (Table of Contents)
+  TocOpen = false              # 目录默认折叠，点击才展开
+  
+  # 网页加载时的顶部进度条颜色
+  assets.favicon = "/avatar.png" 
+
+# ==========================================
+# 社交图标
+# ==========================================
+[[params.socialIcons]]
+  name = "github"
+  url = "https://github.com/Hical61"
+[[params.socialIcons]]
+  name = "email"
+  url = "mailto:hical@hicalio.cn"
+
+# ==========================================
+# 顶部导航栏菜单
+# ==========================================
 [[menu.main]]
   name = "🏠 主页"
   url = "/"
   weight = 10
-
+[[menu.main]]
+  name = "📚 文章"
+  url = "/posts/"
+  weight = 20
 [[menu.main]]
   name = "🔍 搜索"
   url = "/search/"
-  weight = 20
-
+  weight = 30
