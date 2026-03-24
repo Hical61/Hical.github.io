@@ -833,7 +833,7 @@
 						</div>
 						<div class="info-row">
 							<span class="info-lbl">// LOC</span>
-							<span class="info-val">成都, 中国 📍</span>
+							<span class="info-val">深圳, 中国 📍</span>
 						</div>
 						<div class="info-row">
 							<span class="info-lbl">// GIT</span>
@@ -1192,11 +1192,11 @@
 			}
 			var m1 = mer(0, 0x00f5ff, .35), m2 = mer(Math.PI / 3, 0xff00ff, .18), m3 = mer(Math.PI * 2 / 3, 0x00f5ff, .12);
 
-			// 成都标记
+			// 深圳标记
 			var dG = new THREE.SphereGeometry(.025, 8, 8);
 			var dM = new THREE.MeshBasicMaterial({ color: 0xff00ff });
 			var dMesh = new THREE.Mesh(dG, dM);
-			var lat = 30.67 * Math.PI / 180, lng = 104.06 * Math.PI / 180;
+			var lat = 22.54 * Math.PI / 180, lng = 114.06 * Math.PI / 180;
 			dMesh.position.set(Math.cos(lat) * Math.cos(lng), Math.sin(lat), -Math.cos(lat) * Math.sin(lng));
 
 			var rG = new THREE.RingGeometry(.035, .05, 32);
