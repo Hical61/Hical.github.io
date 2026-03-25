@@ -4,11 +4,17 @@ draft = false
 title = '圆桌随机算法'
 +++
 
--- 前言：多年项目开发，总是会遇到很多随机算法场景，特别是策划要求进行权重累加且不放回抽取模式的场景。现总结一套圆桌随机算法以供参考
--- 第1版 （该版本是为最初版本，为了解决基本的项目需求而设计的）
--------------------------------------------------
-----------------圆桌随机算法---------------------
--------------------------------------------------
+## 前言
+
+多年项目开发，总是会遇到很多随机算法场景，特别是策划要求进行权重累加且不放回抽取模式的场景。现总结一套圆桌随机算法以供参考。
+
+---
+
+## 第 1 版 —— 基础实现
+
+第 1 版为最初版本，为了解决基本的项目需求而设计，实现了权重区间查找的核心逻辑。
+
+```lua
 -- 圆桌随机类
 g_tRoundTable = {}
 g_tRoundTable.__index = g_tRoundTable
@@ -95,45 +101,54 @@ end
 function g_tRoundTable:getLastError()
     return self.lastError
 end
+```
 
+---
 
--- 后来因需求越来越复杂，要求也越来越多，比如需要频繁动态调整，需要重复，且性能也急需提升，故而2.0版本诞生了
--- 第2版
-1、算法优化：线性查找 → 二分查找（性能提升50-100倍）
-2、存储优化：重复存储 → 合并计数（空间节省50%+）
-3、功能扩展：基础操作 → 完整的CRUD（增删改查）管理
-4、架构优化：前缀和+索引表双重加速
-5、工程优化：更好的封装、错误处理和可配置性
--------------------------------------------------
-----------------圆桌随机算法---------------------
--------------------------------------------------
+## 第 2 版 —— 性能与功能升级
+
+后来因需求越来越复杂，要求也越来越多，比如需要频繁动态调整、需要重复抽取，且性能也急需提升，故而 2.0 版本诞生了。
+
+**主要改进：**
+
+1. **算法优化**：线性查找 → 二分查找（性能提升 50~100 倍）
+2. **存储优化**：重复存储 → 合并计数（空间节省 50%+）
+3. **功能扩展**：基础操作 → 完整的 CRUD（增删改查）管理
+4. **架构优化**：前缀和 + 索引表双重加速
+5. **工程优化**：更好的封装、错误处理和可配置性
+
+### 使用示例
+
+```lua
+local rt = g_tRoundTable:new()
+rt:setItems({
+    {id = 1, weight = 10},
+    {id = 1, weight = 10}, -- 重复项
+    {id = 2, weight = 20},
+    {id = 2, weight = 20}
+})
+
+-- id=1 的 weight=10 再加 3 份
+rt:modifyItemCount(1, 10, 3)
+
+-- id=2 的 weight=20 直接删掉
+rt:removeItem(2, 20)
+
+-- id=1 的 weight 改成 12（保留现有 count）
+rt:setItemWeight(1, 10, 12)
+
+-- 独立抽取（放回）
+local hits = rt:fetchItems(5, true)
+-- 非独立抽取（不放回）
+local uniqueHits = rt:fetchItems(3, false)
+```
+
+### 完整实现
+
+```lua
 -- 圆桌随机类
 g_tRoundTable = {}
 g_tRoundTable.__index = g_tRoundTable
---[[
-	使用案例
-	local rt = g_tRoundTable:new()
-	rt:setItems({
-		{id = 1, weight = 10},
-		{id = 1, weight = 10}, -- 重复项
-		{id = 2, weight = 20},
-		{id = 2, weight = 20}
-	})
-	
-	-- id=1 的 weight=10 再加 3 份
-	rt:modifyItemCount(1, 10, 3)
-
-	-- id=2 的 weight=20 直接删掉
-	rt:removeItem(2, 20)
-
-	-- id=1 的 weight 改成 12（保留现有 count）
-	rt:setItemWeight(1, 10, 12)
-	
-	-- 独立抽取（放回）
-	local hits = rt:fetchItems(5, true)
-	-- 非独立抽取（不放回）
-	local uniqueHits = rt:fetchItems(3, false)
-]]
 
 -- 构造函数
 -- opts.mergeSameKey: true 表示同 id+weight 的项自动合并为一个节点并维护 count（默认 true）
@@ -334,29 +349,6 @@ function g_tRoundTable:fetchItems(count, independent)
     return results
 end
 
--- 获取当前池子（expand=true 时会展开成原始形式）
-function g_tRoundTable:getAllItems(expand)
-    if expand then
-        local flat = {}
-        for _, node in ipairs(self.items) do
-            for _ = 1, node.count do
-                table.insert(flat, {id = node.id, weight = node.weight})
-            end
-        end
-        return flat
-    end
-    local snapshot = {}
-    for _, node in ipairs(self.items) do
-        table.insert(snapshot, {
-            id = node.id,
-            weight = node.weight,
-            count = node.count,
-            totalWeight = node.totalWeight
-        })
-    end
-    return snapshot
-end
-
 -- 调整某个 id+weight 的数量，可正可负
 function g_tRoundTable:modifyItemCount(id, weight, deltaCount)
     if deltaCount == 0 then
@@ -452,75 +444,109 @@ function g_tRoundTable:setItemWeight(id, oldWeight, newWeight)
     return true
 end
 
+-- 获取当前池子（expand=true 时会展开成原始形式）
+function g_tRoundTable:getAllItems(expand)
+    if expand then
+        local flat = {}
+        for _, node in ipairs(self.items) do
+            for _ = 1, node.count do
+                table.insert(flat, {id = node.id, weight = node.weight})
+            end
+        end
+        return flat
+    end
+    local snapshot = {}
+    for _, node in ipairs(self.items) do
+        table.insert(snapshot, {
+            id = node.id,
+            weight = node.weight,
+            count = node.count,
+            totalWeight = node.totalWeight
+        })
+    end
+    return snapshot
+end
+
 -- 获取最近一次错误
 function g_tRoundTable:getLastError()
     return self.lastError
 end
+```
 
--- 第3版（终极版本，全面适用于所有场景）
--------------------------------------------------
-----------------圆桌随机算法---------------------
--------------------------------------------------
+---
+
+## 第 3 版 —— 终极版本
+
+第 3 版全面适用于所有场景，进行了深度优化。
+
+**优化说明：**
+
+1. **性能优化** — 减少重建索引的开销
+   - 索引增量更新：删除时不完整重建，只调整受影响的索引
+   - 批量操作：支持批量修改并延迟重建索引
+   - 内存优化：`mergeSameKey=false` 时不维护索引表，节省内存
+
+2. **批量操作优化**
+   - `batchModify()`：支持多种操作的批量执行
+   - 统一重建：批量操作完成后只重建一次索引
+
+3. **内存优化**
+   - 可选索引：`useIndex` 参数控制是否维护索引表
+   - 动态切换：`setUseIndex()` 运行时切换索引模式
+   - 内存监控：`getMemoryInfo()` 查看内存占用情况
+
+4. **其他优化**
+   - 浮点精度越界修复
+   - 二分查找边界优化
+   - 非独立模式下预先检查数量是否足够
+
+### 使用示例
+
+```lua
+local rt = g_tRoundTable:new({
+    mergeSameKey = true,  -- 是否合并相同id+weight（默认true）
+    useIndex = true       -- 是否使用索引加速（默认同mergeSameKey）
+})
+
+-- 批量增加项
+rt:setItems({
+    {id = 1, weight = 10},
+    {id = 1, weight = 10}, -- 重复项
+    {id = 2, weight = 20},
+    {id = 2, weight = 20}
+})
+
+-- id=1 的 weight=10 再加 3 份
+rt:modifyItemCount(1, 10, 3)
+
+-- id=2 的 weight=20 直接删掉
+rt:removeItem(2, 20)
+
+-- id=1 的 weight 改成 12（保留现有 count）
+rt:setItemWeight(1, 10, 12)
+
+-- 批量操作示例
+rt:batchModify({
+    {action = "add", id = 1, weight = 10, count = 5},
+    {action = "modify", id = 2, weight = 20, deltaCount = 3},
+    {action = "remove", id = 3, weight = 15}
+})
+
+-- 独立抽取（放回）
+local hits = rt:fetchItems(5, true)
+-- 非独立抽取（不放回）
+local uniqueHits = rt:fetchItems(3, false)
+```
+
+### 完整实现
+
+```lua
 -- 圆桌随机类
 g_tRoundTable = {}
 g_tRoundTable.__index = g_tRoundTable
---[[
-	优化说明：
-	1、性能优化 - 减少重建索引的开销
-		1.1 索引增量更新：删除时不完整重建，只调整受影响的索引
-		1.2 批量操作：支持批量修改并延迟重建索引
-		1.3 内存优化：mergeSameKey=false 时不维护索引表，节省内存
-	2、批量操作优化
-		2.1 batchModify()：支持多种操作的批量执行
-		2.2 统一重建：批量操作完成后只重建一次索引
-	3、内存优化
-		3.1 可选索引：useIndex 参数控制是否维护索引表
-		3.2 动态切换：setUseIndex() 运行时切换索引模式
-		3.3 内存监控：getMemoryInfo() 查看内存占用情况
-		内存节省：当 mergeSameKey=false 时，不维护 indexMap，能节省大量内存
-	4、其他优化
-		4.1 可能因浮点精度导致越界
-		4.2 二分查找边界优化
-		4.3 非独立模式下检查数量是否足够
-			
-			
-	使用案例：
-	local rt = g_tRoundTable:new({
-		mergeSameKey = true,  -- 是否合并相同id+weight（默认true）
-		useIndex = true       -- 是否使用索引加速（默认同mergeSameKey）
-	})
-	-- 批量增加项
-	rt:setItems({
-		{id = 1, weight = 10},
-		{id = 1, weight = 10}, -- 重复项
-		{id = 2, weight = 20},
-		{id = 2, weight = 20}
-	})
-	
-	-- id=1 的 weight=10 再加 3 份
-	rt:modifyItemCount(1, 10, 3)
-
-	-- id=2 的 weight=20 直接删掉
-	rt:removeItem(2, 20)
-
-	-- id=1 的 weight 改成 12（保留现有 count）
-	rt:setItemWeight(1, 10, 12)
-	
-	-- 批量操作示例
-	rt:batchModify({
-		{action = "add", id = 1, weight = 10, count = 5},
-		{action = "modify", id = 2, weight = 20, deltaCount = 3},
-		{action = "remove", id = 3, weight = 15}
-	})
-	
-	-- 独立抽取（放回）
-	local hits = rt:fetchItems(5, true)
-	-- 非独立抽取（不放回）
-	local uniqueHits = rt:fetchItems(3, false)
-]]
 
 -- 构造函数
--- mergeSameKey: 相同id+weight的项会合并成一个节点，用count记录数量 （默认 true）
+-- mergeSameKey: 相同id+weight的项会合并成一个节点，用count记录数量（默认 true）
 -- useIndex: 使用哈希表加速查找，空间换时间
 -- indexDirty: 延迟重建索引，批量操作优化
 function g_tRoundTable:new(opts)
@@ -533,7 +559,7 @@ function g_tRoundTable:new(opts)
 		totalCount		= 0,	-- 总数量
 		lastError		= "",	-- 最后的错误信息
 		mergeSameKey	= opts.mergeSameKey ~= false,	-- 是否合并相同项（默认true）
-		useIndex		= opts.useIndex,	-- 是否使用索引 如果未指定，后续会根据mergeSameKey决定
+		useIndex		= opts.useIndex,	-- 是否使用索引，未指定则根据mergeSameKey决定
 		indexDirty		= false,			-- 索引是否需要重建
 	}
 	
@@ -680,7 +706,7 @@ function g_tRoundTable:_binarySearch(value)
 	local low, high = 1, #self.prefixSums
 	while low < high do
 		local mid = math.floor((low + high) / 2)
-		-- 改进：使用 < 而非 <=，更准确点
+		-- 改进：使用 < 而非 <=，更准确
 		if value < self.prefixSums[mid] then
 			high = mid
 		else
@@ -703,7 +729,7 @@ function g_tRoundTable:_consume(index)
 	self:_applyDelta(index, -delta) -- 减少权重
 	
 	if node.count <= 0 then
-		-- 节点用完，移除（优化，使用增量式索引更新，只调整受影响的索引，避免完整重建）
+		-- 节点用完，移除（增量式索引更新，只调整受影响的索引，避免完整重建）
 		self:_removeIndexAt(index)
 		table.remove(self.items, index)
 		table.remove(self.prefixSums, index)
@@ -736,7 +762,7 @@ function g_tRoundTable:fetchItems(count, independent)
 		return {}
 	end
 	
-	-- 新增：非独立模式下检查数量是否足够
+	-- 非独立模式下检查数量是否足够
 	if not independent and count > self.totalCount then
 		self.lastError = string.format("Insufficient items: need %d, have %d", count, self.totalCount)
 		return {}
@@ -806,7 +832,7 @@ function g_tRoundTable:modifyItemCount(id, weight, deltaCount)
 	self:_applyDelta(idx, deltaWeight)
 	
 	if node.count == 0 then
-		-- 优化，使用增量式索引更新，只调整受影响的索引，避免完整重建
+		-- 增量式索引更新，只调整受影响的索引，避免完整重建
 		self:_removeIndexAt(idx)
 		table.remove(self.items, idx)
 		table.remove(self.prefixSums, idx)
@@ -828,7 +854,7 @@ function g_tRoundTable:removeItem(id, weight)
 	local node = self.items[idx]
 	self.totalWeight = self.totalWeight - node.totalWeight
 	self.totalCount = self.totalCount - node.count
-	-- 优化，使用增量式索引更新，只调整受影响的索引，避免完整重建
+	-- 增量式索引更新，只调整受影响的索引，避免完整重建
 	self:_removeIndexAt(idx)
 	table.remove(self.items, idx)
 	table.remove(self.prefixSums, idx)
@@ -867,15 +893,13 @@ function g_tRoundTable:setItemWeight(id, oldWeight, newWeight)
 end
 
 -- 批量操作接口
---[[
-	operations 格式：
-	{
-		{action = "add", id = 1, weight = 10, count = 5},
-		{action = "modify", id = 2, weight = 20, deltaCount = 3},
-		{action = "remove", id = 3, weight = 15},
-		{action = "setWeight", id = 4, oldWeight = 10, newWeight = 15}
-	}
-]]
+-- operations 格式：
+-- {
+--     {action = "add", id = 1, weight = 10, count = 5},
+--     {action = "modify", id = 2, weight = 20, deltaCount = 3},
+--     {action = "remove", id = 3, weight = 15},
+--     {action = "setWeight", id = 4, oldWeight = 10, newWeight = 15}
+-- }
 function g_tRoundTable:batchModify(operations)
 	if type(operations) ~= "table" then
 		self.lastError = "Operations must be a table"
@@ -994,13 +1018,15 @@ end
 function g_tRoundTable:getLastError()
 	return self.lastError
 end
+```
 
+---
 
-以下是优化后在大数据量下的性能差异有多大的测试
-一、时间复杂度对比
--------------------------------------------------
-----------------性能对比分析---------------------
--------------------------------------------------
+## 性能对比分析
+
+以下是优化后在大数据量下的性能差异对比。
+
+### 一、时间复杂度对比
 
 | 操作类型      | 优化前   | 优化后   | 提升   |
 | ------------- | -------- | -------- | ------ |
@@ -1012,12 +1038,9 @@ end
 | 抽取项        | O(log n) | O(log n) | 持平   |
 | 批量操作(m个) | O(m·n²)  | O(m·n+n) | 显著   |
 
-二、性能测试代码
+### 二、性能测试代码
 
--------------------------------------------------
-----------------性能基准测试---------------------
--------------------------------------------------
-
+```lua
 -- 计时工具
 local function measureTime(fn, ...)
     local startTime = os.clock()
@@ -1032,9 +1055,7 @@ local function getMemoryUsage()
     return collectgarbage("count")  -- KB
 end
 
--------------------------------------------------
 -- 测试用例生成器
--------------------------------------------------
 local function generateTestData(count, weightRange)
     weightRange = weightRange or {1, 100}
     local data = {}
@@ -1047,18 +1068,16 @@ local function generateTestData(count, weightRange)
     return data
 end
 
--------------------------------------------------
 -- 性能测试套件
--------------------------------------------------
 local PerformanceTest = {}
 
 -- 测试1：批量添加性能
 function PerformanceTest:testBatchAdd(itemCount)
-	error(string.format("\n=== 测试批量添加 %d 项 ===", itemCount))
+	print(string.format("\n=== 测试批量添加 %d 项 ===", itemCount))
 	
 	local testData = generateTestData(itemCount)
 	
-	-- 优化前：逐个添加
+	-- 优化前：逐个添加（无索引）
 	local rtOld = g_tRoundTable:new({mergeSameKey = true, useIndex = false})
 	local timeOld, _ = measureTime(function()
 		for _, item in ipairs(testData) do
@@ -1074,14 +1093,14 @@ function PerformanceTest:testBatchAdd(itemCount)
 		end
 	end)
 	
-	error(string.format("无索引: %.2f ms", timeOld))
-	error(string.format("有索引: %.2f ms", timeNew))
-	error(string.format("提升: %.1f%%", (timeOld - timeNew) / timeOld * 100))
+	print(string.format("无索引: %.2f ms", timeOld))
+	print(string.format("有索引: %.2f ms", timeNew))
+	print(string.format("提升: %.1f%%", (timeOld - timeNew) / timeOld * 100))
 end
 
 -- 测试2：批量删除性能
 function PerformanceTest:testBatchRemove(itemCount, removeCount)
-	error(string.format("\n=== 测试批量删除 %d/%d 项 ===", removeCount, itemCount))
+	print(string.format("\n=== 测试批量删除 %d/%d 项 ===", removeCount, itemCount))
 	
 	local testData = generateTestData(itemCount)
 	
@@ -1092,7 +1111,6 @@ function PerformanceTest:testBatchRemove(itemCount, removeCount)
 		for i = 1, removeCount do
 			local item = testData[i]
 			rtOld:removeItem(item.id, item.weight)
-			-- 模拟旧版：每次都完整重建
 			rtOld:_rebuildIndex()
 		end
 	end)
@@ -1107,18 +1125,17 @@ function PerformanceTest:testBatchRemove(itemCount, removeCount)
 		end
 	end)
 	
-	error(string.format("完整重建: %.2f ms", timeOld))
-	error(string.format("增量更新: %.2f ms", timeNew))
-	error(string.format("提升: %.1f%%", (timeOld - timeNew) / timeOld * 100))
+	print(string.format("完整重建: %.2f ms", timeOld))
+	print(string.format("增量更新: %.2f ms", timeNew))
+	print(string.format("提升: %.1f%%", (timeOld - timeNew) / timeOld * 100))
 end
 
 -- 测试3：批量操作 vs 单次操作
 function PerformanceTest:testBatchModify(itemCount, modifyCount)
-	error(string.format("\n=== 测试批量修改 %d/%d 项 ===", modifyCount, itemCount))
+	print(string.format("\n=== 测试批量修改 %d/%d 项 ===", modifyCount, itemCount))
 	
 	local testData = generateTestData(itemCount)
 	
-	-- 生成修改操作
 	local operations = {}
 	for i = 1, modifyCount do
 		local op = math.random(1, 3)
@@ -1168,75 +1185,67 @@ function PerformanceTest:testBatchModify(itemCount, modifyCount)
 		rtBatch:batchModify(operations)
 	end)
 	
-	error(string.format("单次操作: %.2f ms", timeSingle))
-	error(string.format("批量操作: %.2f ms", timeBatch))
-	error(string.format("提升: %.1f%%", (timeSingle - timeBatch) / timeSingle * 100))
+	print(string.format("单次操作: %.2f ms", timeSingle))
+	print(string.format("批量操作: %.2f ms", timeBatch))
+	print(string.format("提升: %.1f%%", (timeSingle - timeBatch) / timeSingle * 100))
 end
 
 -- 测试4：内存占用对比
 function PerformanceTest:testMemoryUsage(itemCount)
-	error(string.format("\n=== 测试内存占用 %d 项 ===", itemCount))
+	print(string.format("\n=== 测试内存占用 %d 项 ===", itemCount))
 	
 	local testData = generateTestData(itemCount)
 	
-	-- 无索引模式
 	local memBefore1 = getMemoryUsage()
 	local rtNoIndex = g_tRoundTable:new({mergeSameKey = true, useIndex = false})
 	rtNoIndex:setItems(testData)
-	local memAfter1 = getMemoryUsage()
-	local memNoIndex = memAfter1 - memBefore1
+	local memNoIndex = getMemoryUsage() - memBefore1
 	
-	-- 有索引模式
 	local memBefore2 = getMemoryUsage()
 	local rtWithIndex = g_tRoundTable:new({mergeSameKey = true, useIndex = true})
 	rtWithIndex:setItems(testData)
-	local memAfter2 = getMemoryUsage()
-	local memWithIndex = memAfter2 - memBefore2
+	local memWithIndex = getMemoryUsage() - memBefore2
 	
-	error(string.format("  无索引: %.2f KB", memNoIndex))
-	error(string.format("  有索引: %.2f KB", memWithIndex))
-	error(string.format("  额外开销: %.2f KB (%.1f%%)", 
+	print(string.format("  无索引: %.2f KB", memNoIndex))
+	print(string.format("  有索引: %.2f KB", memWithIndex))
+	print(string.format("  额外开销: %.2f KB (%.1f%%)", 
 		memWithIndex - memNoIndex, 
 		(memWithIndex - memNoIndex) / memNoIndex * 100))
 	
-	-- 内存信息
 	local info = rtWithIndex:getMemoryInfo()
-	error(string.format("  索引项数: %d", info.indexCount))
+	print(string.format("  索引项数: %d", info.indexCount))
 end
 
 -- 测试5：抽取性能（独立/非独立）
 function PerformanceTest:testFetchPerformance(itemCount, fetchCount)
-	error(string.format("\n=== 测试抽取性能 %d 次（池子 %d 项）===", fetchCount, itemCount))
+	print(string.format("\n=== 测试抽取性能 %d 次（池子 %d 项）===", fetchCount, itemCount))
 	
 	local testData = generateTestData(itemCount)
 	
-	-- 独立抽取（放回）
 	local rt1 = g_tRoundTable:new()
 	rt1:setItems(testData)
 	local timeIndependent, _ = measureTime(function()
 		rt1:fetchItems(fetchCount, true)
 	end)
 	
-	-- 非独立抽取（不放回）
 	local rt2 = g_tRoundTable:new()
 	rt2:setItems(testData)
 	local timeDependent, _ = measureTime(function()
 		rt2:fetchItems(math.min(fetchCount, itemCount), false)
 	end)
 	
-	error(string.format("独立抽取(放回): %.2f ms (%.2f μs/次)", 
+	print(string.format("独立抽取(放回): %.2f ms (%.2f μs/次)", 
 		timeIndependent, timeIndependent * 1000 / fetchCount))
-	error(string.format("非独立抽取(不放回): %.2f ms (%.2f μs/次)", 
+	print(string.format("非独立抽取(不放回): %.2f ms (%.2f μs/次)", 
 		timeDependent, timeDependent * 1000 / math.min(fetchCount, itemCount)))
 end
 
 -- 测试6：查找性能
 function PerformanceTest:testLookupPerformance(itemCount, lookupCount)
-	error(string.format("\n=== 测试查找性能 %d 次（池子 %d 项）===", lookupCount, itemCount))
+	print(string.format("\n=== 测试查找性能 %d 次（池子 %d 项）===", lookupCount, itemCount))
 	
 	local testData = generateTestData(itemCount)
 	
-	-- 无索引
 	local rtNoIndex = g_tRoundTable:new({mergeSameKey = true, useIndex = false})
 	rtNoIndex:setItems(testData)
 	local timeNoIndex, _ = measureTime(function()
@@ -1246,7 +1255,6 @@ function PerformanceTest:testLookupPerformance(itemCount, lookupCount)
 		end
 	end)
 	
-	-- 有索引
 	local rtWithIndex = g_tRoundTable:new({mergeSameKey = true, useIndex = true})
 	rtWithIndex:setItems(testData)
 	local timeWithIndex, _ = measureTime(function()
@@ -1256,21 +1264,18 @@ function PerformanceTest:testLookupPerformance(itemCount, lookupCount)
 		end
 	end)
 	
-	error(string.format("无索引: %.2f ms", timeNoIndex))
-	error(string.format("有索引: %.2f ms", timeWithIndex))
-	error(string.format("提升: %.1f%%", (timeNoIndex - timeWithIndex) / timeNoIndex * 100))
+	print(string.format("无索引: %.2f ms", timeNoIndex))
+	print(string.format("有索引: %.2f ms", timeWithIndex))
+	print(string.format("提升: %.1f%%", (timeNoIndex - timeWithIndex) / timeNoIndex * 100))
 end
 
--------------------------------------------------
 -- 综合测试运行器
--------------------------------------------------
 function PerformanceTest:runAll()
-	error("\n" .. string.rep("=", 60))
-	error("============圆桌随机算法性能测试==================")
-	error(string.rep("=", 60))
+	print("\n" .. string.rep("=", 60))
+	print("============圆桌随机算法性能测试==================")
+	print(string.rep("=", 60))
 	
-	-- 小规模测试
-	error("\n【小规模测试 - 1000项】")
+	print("\n【小规模测试 - 1000项】")
 	self:testBatchAdd(1000)
 	self:testBatchRemove(1000, 100)
 	self:testBatchModify(1000, 200)
@@ -1278,8 +1283,7 @@ function PerformanceTest:runAll()
 	self:testFetchPerformance(1000, 10000)
 	self:testLookupPerformance(1000, 1000)
 	
-	-- 中规模测试
-	error("\n【中规模测试 - 10000项】")
+	print("\n【中规模测试 - 10000项】")
 	self:testBatchAdd(10000)
 	self:testBatchRemove(10000, 1000)
 	self:testBatchModify(10000, 2000)
@@ -1287,8 +1291,7 @@ function PerformanceTest:runAll()
 	self:testFetchPerformance(10000, 50000)
 	self:testLookupPerformance(10000, 5000)
 	
-	-- 大规模测试
-	error("\n【大规模测试 - 100000项】")
+	print("\n【大规模测试 - 100000项】")
 	self:testBatchAdd(100000)
 	self:testBatchRemove(100000, 10000)
 	self:testBatchModify(100000, 20000)
@@ -1296,52 +1299,52 @@ function PerformanceTest:runAll()
 	self:testFetchPerformance(100000, 100000)
 	self:testLookupPerformance(100000, 10000)
 	
-	error("\n" .. string.rep("=", 60))
-	error("测试完成！")
-	error(string.rep("=", 60) .. "\n")
+	print("\n" .. string.rep("=", 60))
+	print("测试完成！")
+	print(string.rep("=", 60) .. "\n")
 end
 
--------------------------------------------------
--- 使用示例
--------------------------------------------------
---运行完整测试
+-- 运行完整测试
 PerformanceTest:runAll()
 
--- --或运行单个测试
+-- 或运行单个测试
 -- PerformanceTest:testBatchAdd(50000)
 -- PerformanceTest:testBatchRemove(10000, 5000)
+```
 
+### 三、实测性能数据预估
 
-三、实测性能数据
--------------------------------------------------
--- 性能提升预估报告
--------------------------------------------------
-【小规模 - 1000项】
-  批量添加:      10% ~ 20% 提升
-  批量删除100项:  60% ~ 70% 提升
-  批量修改200项:  50% ~ 65% 提升
-  内存开销:      +5% ~ 10%
-  查找操作:      95% ~ 98% 提升
+**小规模（1000项）**
 
-【中规模 - 10000项】
-  批量添加:      15% ~ 30% 提升
-  批量删除1000项: 75% ~ 85% 提升
-  批量修改2000项: 70% ~ 80% 提升
-  内存开销:      +8% ~ 15%
-  查找操作:      98% ~ 99% 提升
+- 批量添加：10% ~ 20% 提升
+- 批量删除 100 项：60% ~ 70% 提升
+- 批量修改 200 项：50% ~ 65% 提升
+- 内存开销：+5% ~ 10%
+- 查找操作：95% ~ 98% 提升
 
-【大规模 - 100000项】
-  批量添加:      30% ~ 50% 提升
-  批量删除10000项: 85% ~ 95% 提升
-  批量修改20000项: 80% ~ 90% 提升
-  内存开销:      +10% ~ 20%
-  查找操作:      99%+ 提升
+**中规模（10000项）**
 
-四、使用场景推荐
--------------------------------------------------
--- 使用场景推荐
--------------------------------------------------
+- 批量添加：15% ~ 30% 提升
+- 批量删除 1000 项：75% ~ 85% 提升
+- 批量修改 2000 项：70% ~ 80% 提升
+- 内存开销：+8% ~ 15%
+- 查找操作：98% ~ 99% 提升
 
+**大规模（100000项）**
+
+- 批量添加：30% ~ 50% 提升
+- 批量删除 10000 项：85% ~ 95% 提升
+- 批量修改 20000 项：80% ~ 90% 提升
+- 内存开销：+10% ~ 20%
+- 查找操作：99%+ 提升
+
+---
+
+## 四、使用场景推荐
+
+根据不同的业务场景选择合适的配置：
+
+```lua
 -- 场景1: 高频查找/修改（推荐：启用索引）
 local rt = g_tRoundTable:new({
     mergeSameKey = true,
@@ -1366,6 +1369,8 @@ rt:batchModify({
     {action = "modify", id = 2, weight = 20, deltaCount = 5},
     {action = "remove", id = 3, weight = 15}
 })
+```
 
+---
 
-最后，我希望能得到你的一些反馈，以便我能更好地改进此圆桌随机算法。你愿意提供一些建议吗？
+最后，如果你有任何改进建议，欢迎交流 🤝
