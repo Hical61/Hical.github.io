@@ -6,9 +6,9 @@ title = '极客专属博客搭建全记录'
 
 # 🚀 极客专属博客搭建全记录 (Hugo + GitHub Actions)
 
-**技术栈**：Hugo (Extended版) + GitHub Pages + GitHub Actions CI/CD
-**主题**：PaperMod (极简名片风 / 深色模式)
-**作者**：Hical
+- **技术栈**：Hugo (Extended版) + GitHub Pages + GitHub Actions CI/CD
+- **主题**：PaperMod (极简名片风 / 深色模式)
+- **作者**：Hical
 
 ---
 
@@ -69,7 +69,7 @@ theme = 'PaperMod'
 [params.profileMode]
   enabled = true
   title = "Hical"
-  subtitle = "🧊 冰川网络 | 远征Online服务器组 | C++ 后端老兵"
+  subtitle = "🧊 冰川网络 | C++ 开发"
   imageUrl = "/avatar.png" # 请将头像图片放入 static/ 目录
   imageWidth = 150
   imageHeight = 150
