@@ -102,3 +102,20 @@ export default config;
 
 # frontend/src/core/i18n/locales/zh-CN.ts：在 tokenUsage 的 total: "总计", 后添加了 }, 并将末尾的 }} 改为 }。
 
+
+7. **启动集群**：
+# 进入 docker 目录，执行终极启动指令（首次拉取可能较慢，建议配置阿里云 Docker 镜像源）：
+
+```bash
+
+cd docker
+docker compose --env-file ../.env up -d --build
+
+```
+# 注意：(如果中途构建失败，或者修改了环境变量，可使用 docker compose --env-file ../.env build --no-cache frontend 强制清除缓存重新打包。)
+
+8. **验收与使用**：
+# 当执行 docker compose ps 看到 nginx、frontend、langgraph、postgres 等容器均处于 Up 状态时，部署完成！
+# 打开浏览器，访问 Nginx 统一网关地址：👉 http://localhost:2026
+# 点击首屏进入 Workspace。
+# 在底部对话框输入复杂的排障指令，体验多智能体在隔离沙盒中的自动编码与分析能力！
