@@ -430,3 +430,155 @@ curl http://localhost:2026/health
 | `environment` 优先级更高        | 在 compose 的 `environment` 块中覆盖同名变量，可防止 `env_file` 的值污染容器           |
 | volume mount 路径 vs 容器内路径 | 宿主机路径用于 `volumes` 挂载（Docker Desktop 自动转换），容器内路径用于程序运行时读取 |
 
+
+---
+
+## 附：Web 搜索 "API Key 认证失败" 排查
+
+### 现象
+
+AI 对话时，每次尝试联网搜索均报错：
+
+```
+当前网络搜索工具暂时无法使用（API Key 认证失败）
+```
+
+即使填写了其他大模型的 API Key，搜索功能依然不可用。
+
+### 根本原因
+
+DeerFlow 默认使用 **Tavily** 作为网页搜索工具，Tavily 需要单独注册账号并获取 `TAVILY_API_KEY`。若 `.env` 中未配置该 Key，调用时直接返回认证失败。
+
+查看 `config.yaml` 中默认配置：
+
+```yaml
+- name: web_search
+  group: web
+  use: deerflow.community.tavily.tools:web_search_tool
+```
+
+### 解决方案：切换到 DuckDuckGo（无需 API Key）
+
+DeerFlow 代码库中已内置 `ddgs` 库（DuckDuckGo 搜索），只需新建工具文件并修改配置即可。
+
+#### Step 1：新建 DuckDuckGo 工具模块
+
+新建文件 `backend/packages/harness/deerflow/community/duckduckgo/__init__.py`（空文件，声明包）。
+
+新建文件 `backend/packages/harness/deerflow/community/duckduckgo/tools.py`：
+
+```python
+"""
+Web Search Tool - Search the web using DuckDuckGo (no API key required).
+"""
+
+import json
+import logging
+
+from langchain.tools import tool
+
+from deerflow.config import get_app_config
+
+logger = logging.getLogger(__name__)
+
+
+@tool("web_search", parse_docstring=True)
+def web_search_tool(query: str) -> str:
+    """Search the web.
+
+    Args:
+        query: The query to search for.
+    """
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        return json.dumps({"error": "ddgs library not installed."})
+
+    config = get_app_config().get_tool_config("web_search")
+    max_results = 5
+    if config is not None and "max_results" in config.model_extra:
+        max_results = config.model_extra.get("max_results", max_results)
+
+    try:
+        ddgs = DDGS(timeout=30)
+        results = list(ddgs.text(query, max_results=max_results))
+    except Exception as e:
+        logger.error(f"DuckDuckGo search failed: {e}")
+        return json.dumps({"error": str(e)})
+
+    if not results:
+        return json.dumps({"error": "No results found", "query": query}, ensure_ascii=False)
+
+    normalized = [
+        {
+            "title": r.get("title", ""),
+            "url": r.get("href", ""),
+            "content": r.get("body", ""),
+        }
+        for r in results
+    ]
+
+    return json.dumps(
+        {"query": query, "total_results": len(normalized), "results": normalized},
+        indent=2,
+        ensure_ascii=False,
+    )
+```
+
+#### Step 2：修改 `config.yaml`
+
+将 `web_search` 工具的 `use` 字段从 Tavily 切换到 DuckDuckGo：
+
+```yaml
+# Web search tool (uses DuckDuckGo, no API key required)
+- name: web_search
+  group: web
+  use: deerflow.community.duckduckgo.tools:web_search_tool
+  max_results: 5
+```
+
+> `config.yaml` 支持热重载（文件修改后无需重启容器），但新增 Python 模块属于代码变更，必须重建镜像。
+
+#### Step 3：重建 backend 镜像并重启容器
+
+新文件是在宿主机上创建的，但容器内的代码是构建镜像时 `COPY` 进去的，**必须重建镜像才能生效**：
+
+```powershell
+cd d:\hical\deer-flow
+
+# 重建两个 backend 镜像（gateway 和 langgraph 共用同一个 Dockerfile）
+docker build -t deer-flow-gateway -f backend/Dockerfile .
+docker build -t deer-flow-langgraph -f backend/Dockerfile .
+
+# 重启服务（langgraph 和 gateway 容器会用新镜像重建）
+cd docker
+docker compose -p deer-flow --env-file ../.env up -d --pull never
+```
+
+#### Step 4：验证
+
+```powershell
+# 验证模块可被正常导入
+docker exec deer-flow-gateway sh -c "cd /app/backend && uv run python -c \"from deerflow.community.duckduckgo.tools import web_search_tool; print('OK:', web_search_tool.name)\""
+# 期望输出：OK: web_search
+
+# 验证搜索功能正常（需要能访问外网）
+docker exec deer-flow-gateway sh -c "cd /app/backend && uv run python -c \"
+from deerflow.community.duckduckgo.tools import web_search_tool
+import json
+result = json.loads(web_search_tool.invoke({'query': 'Python programming'}))
+print('Total results:', result.get('total_results'))
+\""
+# 期望输出：Total results: 5
+```
+
+验证通过后，在 http://localhost:2026 重新发起对话，搜索功能即可正常使用。
+
+### 关键结论
+
+| 知识点              | 说明                                                                        |
+| ------------------- | --------------------------------------------------------------------------- |
+| Tavily 需要 API Key | DeerFlow 默认使用 Tavily，未配置 `TAVILY_API_KEY` 时搜索直接失败            |
+| DuckDuckGo 无需 Key | `ddgs` 库已内置在项目依赖中，直接调用即可                                   |
+| config.yaml 热重载  | 只修改 `config.yaml` 无需重启；但新增 Python 文件属于代码变更，必须重建镜像 |
+| 镜像重建命令        | `docker build`（非 `docker compose build`）才能将产物写入 Docker daemon     |
