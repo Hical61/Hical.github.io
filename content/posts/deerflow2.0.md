@@ -2,6 +2,9 @@
 date = '2026-03-25'
 draft = false
 title = 'DeerFlow 2.0 本地部署与排坑实战指南'
+categories = ["AI 探索"]
+tags = ["AI", "DeerFlow", "Docker", "本地部署", "多智能体"]
+description = "Windows + Docker Desktop 环境下部署字节跳动开源多智能体框架 DeerFlow 2.0 的完整踩坑记录。"
 +++
 
 # 🦌 DeerFlow 2.0 本地化部署与排坑实战指南
@@ -44,7 +47,7 @@ models:
   - name: claude-sonnet-4-6
     display_name: Claude Sonnet 4.6 (Claude Code OAuth)
     use: langchain_anthropic:ChatAnthropic
-    model: claude-4.5-sonnet
+    model: claude-sonnet-4-6
     api_key: $ANTHROPIC_API_KEY
     max_tokens: 8192
 
@@ -430,7 +433,6 @@ curl http://localhost:2026/health
 | `environment` 优先级更高        | 在 compose 的 `environment` 块中覆盖同名变量，可防止 `env_file` 的值污染容器           |
 | volume mount 路径 vs 容器内路径 | 宿主机路径用于 `volumes` 挂载（Docker Desktop 自动转换），容器内路径用于程序运行时读取 |
 
-
 ---
 
 ## 附：Web 搜索 "API Key 认证失败" 排查
@@ -582,3 +584,4 @@ print('Total results:', result.get('total_results'))
 | DuckDuckGo 无需 Key | `ddgs` 库已内置在项目依赖中，直接调用即可                                   |
 | config.yaml 热重载  | 只修改 `config.yaml` 无需重启；但新增 Python 文件属于代码变更，必须重建镜像 |
 | 镜像重建命令        | `docker build`（非 `docker compose build`）才能将产物写入 Docker daemon     |
+

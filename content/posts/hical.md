@@ -2,6 +2,9 @@
 date = '2026-03-25'
 draft = false
 title = '极客专属博客搭建全记录'
+categories = ["工具与效率"]
+tags = ["Hugo", "GitHub Actions", "博客搭建", "PaperMod", "CI/CD"]
+description = "从零搭建 Hugo + PaperMod 博客，配置 GitHub Actions 自动部署，绑定自定义域名全过程记录。"
 +++
 
 # 🚀 极客专属博客搭建全记录 (Hugo + GitHub Actions)

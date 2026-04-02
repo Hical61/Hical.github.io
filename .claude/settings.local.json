@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /d/hical/hical-geek-blog -not -path */public/* -not -path */.git/* -not -path */PaperMod/* -type f)",
+      "Bash(wc -l /d/hical/hical-geek-blog/content/posts/*.md)",
+      "Bash(git -C /d/hical/hical-geek-blog log --all --graph --oneline --decorate)"
+    ]
+  }
+}

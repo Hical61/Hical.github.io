@@ -50,14 +50,22 @@ paginate = 8
 # 顶部导航栏菜单
 # ==========================================
 [[menu.main]]
-  name = "🏠 主页"
+  name = "🏠 归巢"
   url = "/"
   weight = 10
 [[menu.main]]
-  name = "📚 文章"
+  name = "✨ 浮光集"
   url = "/posts/"
   weight = 20
 [[menu.main]]
-  name = "🔍 搜索"
+  name = "🗺️ 目录"
+  url = "/categories/"
+  weight = 25
+[[menu.main]]
+  name = "💫 光晕"
+  url = "/tags/"
+  weight = 27
+[[menu.main]]
+  name = "🔍 探幽"
   url = "/search/"
   weight = 30
