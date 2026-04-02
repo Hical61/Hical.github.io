@@ -432,6 +432,15 @@ MsgBuffer buildResponse(uint16_t msgId, const std::string &body)
 
 ---
 
+## 核心收获
+
+- 双指针 `_readIndex` / `_writeIndex`：中间是可读数据，右侧是可写空间，左侧 8 字节 prepend 区预留报头
+- `prepend` 区的价值：插入包头无需移动数据，直接向左写即可（游戏协议常见操作）
+- `readFd()` 用 `readv` + 栈上 65536 字节备用缓冲：单次 syscall 读完内核数据，再按需扩展 MsgBuffer
+- `BufferNode` 4 种子类（内存/Unix文件/Win文件/异步流）支撑 `writeBufferList_` 的零拷贝发送
+
+---
+
 ## 十、思考题
 
 1. `retrieve` 只移动 `head_` 指针而不清除数据，有没有数据泄露风险？（提示：考虑 `peek` 后的旧数据）
@@ -441,13 +450,133 @@ MsgBuffer buildResponse(uint16_t msgId, const std::string &body)
 
 ---
 
-*学习日期：2026-04-01 | 上一课：[第01课_日志系统](第01课_日志系统.md) | 下一课：[第03课_日期时间与工具函数](第03课_日期时间与工具函数.md)*
+## 十一、思考题参考答案
+
+### 1. `retrieve` 只移动 `head_` 指针而不清除数据，有没有数据泄露风险？
+
+**在正常使用下没有数据泄露风险**，但需要理解"为什么没有"。
+
+首先看 `retrieve` 的实现（MsgBuffer.cc 第 131-139 行）：
+
+```cpp
+void MsgBuffer::retrieve(size_t len) {
+    if (len >= readableBytes()) { retrieveAll(); return; }
+    head_ += len;  // 只移动指针，旧数据仍残留在 [旧head_, 新head_) 区间
+}
+```
+
+`head_` 右移后，`[旧head_, 新head_)` 区间的数据仍然物理存在于 `buffer_` 中，但**外部代码无法访问到这些数据**，原因如下：
+
+1. **API 封闭性**：`peek()` 返回的是 `begin() + head_`，即新 `head_` 位置；`readableBytes()` 返回 `tail_ - head_`（不包含旧数据区间）。所有读取 API（`peekInt32`、`read`、`operator[]` 等）都以 `head_` 作为起始，**不可能读到 `head_` 左边的数据**。
+
+2. **数据会被自然覆盖**：当 `ensureWritableBytes` 执行碎片整理策略时（策略1），会调用 `std::copy` 把可读数据移动到 `kBufferOffset` 位置，旧数据区间会被覆盖。当 `retrieveAll` 执行时，`head_` 和 `tail_` 都重置为 `kBufferOffset`，之后新数据写入会覆盖旧区域。
+
+3. **不做 memset 是性能优化**：网络 IO 是高频操作，每次 `retrieve` 都对已消费区域做 `memset` 清零完全没有必要——这些字节马上就会被新数据覆盖。
+
+**但有一个理论上的边界情况**：如果 `MsgBuffer` 对象被序列化（比如把整个 `buffer_` 的内存 dump 出去）或者通过内存调试工具查看，确实能看到已消费但未清零的旧数据。对于网络协议数据这通常不是问题；但如果缓冲区中曾经存放过密码等敏感信息，理论上存在残留风险。在游戏服务器场景下，MsgBuffer 存放的是协议包，不包含明文密码，所以不构成实际风险。
 
 ---
 
-## 核心收获
+### 2. `readFd` 中 `extBuffer` 是栈上 8192 字节，如果一次读到超过 `writable + 8192` 的数据会怎样？
 
-- 双指针 `_readIndex` / `_writeIndex`：中间是可读数据，右侧是可写空间，左侧 8 字节 prepend 区预留报头
-- `prepend` 区的价值：插入包头无需移动数据，直接向左写即可（游戏协议常见操作）
-- `readFd()` 用 `readv` + 栈上 65536 字节备用缓冲：单次 syscall 读完内核数据，再按需扩展 MsgBuffer
-- `BufferNode` 4 种子类（内存/Unix文件/Win文件/异步流）支撑 `writeBufferList_` 的零拷贝发送
+**不会出现这种情况**，因为 `readv` 的语义保证了单次调用最多读入 `vec[0].iov_len + vec[1].iov_len` 字节。
+
+看 `readFd` 的实现（MsgBuffer.cc 第 148-173 行）：
+
+```cpp
+vec[0].iov_len = writable;          // buffer 可写区大小
+vec[1].iov_len = sizeof(extBuffer); // 8192 字节
+const int iovcnt = (writable < sizeof extBuffer) ? 2 : 1;
+ssize_t n = ::readv(fd, vec, iovcnt);
+```
+
+`readv` 是**散布读取**（scatter read），内核会按照 `iovec` 数组的顺序依次填充，**总共最多填充 `vec[0].iov_len + vec[1].iov_len` 字节**（当 `iovcnt == 2` 时）。即使 socket 内核接收缓冲区里有 100KB 数据，这次 `readv` 也最多只读 `writable + 8192` 字节。
+
+**剩余的数据怎么办？**
+
+内核接收缓冲区中未读完的数据会继续保留，下一次 epoll/IOCP 通知 socket 可读时，EventLoop 会再次调用 `readFd`。也就是说，大量数据不是一次 `readFd` 读完的，而是分多次读取，每次最多 `writable + 8192` 字节。
+
+**这个设计的合理性**：
+
+- 8192 字节作为栈上临时缓冲区是一个经验值，既不会爆栈（Linux 默认栈大小 8MB），又能减少小包场景下不必要的 buffer 扩容
+- 如果 buffer 可写空间 >= 8192（`writable >= sizeof(extBuffer)`），则 `iovcnt = 1`，不使用 `extBuffer`，直接读入 buffer——这种情况下单次读取上限就是 `writable`
+- 对于 LT（Level Triggered）模式，数据没读完内核会持续通知；对于 ET（Edge Triggered）模式，通常会在循环中反复调用 `readFd` 直到返回 `EAGAIN`
+
+---
+
+### 3. `addInFront` 情况 2 为什么要向后移动数据而不是向前？
+
+先看情况 2 触发的条件（MsgBuffer.cc 第 216-221 行）：
+
+```cpp
+// 进入情况2的前提：head_ < len（prepend区不够），但 writableBytes() >= len
+if (len <= writableBytes()) {
+    std::copy(begin() + head_, begin() + tail_, begin() + head_ + len);
+    memcpy(begin() + head_, buf, len);
+    tail_ += len;
+    return;
+}
+```
+
+**为什么不向前移动？** 关键在于理解此时的内存布局：
+
+```
+情况2的前提条件：head_ < len，且尾部可写 >= len
+
+[  head_字节  ][── 可读数据 ──][──── 可写空间(>= len) ────]
+0            head_            tail_                    size()
+```
+
+- `head_` 前面只有不到 `len` 字节的空间，即使把数据向前移到 offset=0，前面也不够放下 `len` 字节的新数据
+- 尾部可写空间 >= `len`，所以把**可读数据整体右移 `len` 字节**，就能在 `[head_, head_+len)` 腾出恰好 `len` 字节的空间来写入新数据
+
+如果向前移动数据（移到 `kBufferOffset` 处），头部空间反而会变得更小（最多 `kBufferOffset` 字节），而 `head_` 已经小于 `len`，`kBufferOffset`（= 8）大概率也小于 `len`，向前移动后**头部仍然不够**。
+
+向后移动的精确逻辑是：
+
+```
+操作前：
+[小空间][─── 可读数据 ───][──── 足够的可写空间 ────]
+       ↑head_            ↑tail_
+
+操作后（右移 len 字节）：
+[小空间][新数据 len字节][─── 可读数据 ───][剩余可写]
+       ↑head_                            ↑tail_(+=len)
+```
+
+新数据写入 `[head_, head_+len)` 处，原有可读数据被推到 `[head_+len, tail_+len)`，`tail_` 增加 `len`。整个操作只需要一次 `std::copy` + 一次 `memcpy`，无需分配新内存。
+
+---
+
+### 4. 为什么 `appendInt16/32/64` 调用 `htons/htonl`，而 `appendInt8` 不调用？
+
+**因为单字节没有字节序的概念。**
+
+字节序（Byte Order / Endianness）是指**多字节整数**在内存中的存放顺序：
+
+- **大端序**（Big Endian / 网络字节序）：高位字节在低地址，如 `0x1234` 存为 `[12, 34]`
+- **小端序**（Little Endian / x86）：低位字节在低地址，如 `0x1234` 存为 `[34, 12]`
+
+对于 `uint8_t`（1 个字节），只有一个字节，不存在"高位字节放哪、低位字节放哪"的问题——无论大端小端，内存中就是那一个字节值。所以 `appendInt8` 直接把这个字节写入缓冲区即可：
+
+```cpp
+// MsgBuffer.h 第 190-193 行
+void appendInt8(const uint8_t b) {
+    append(static_cast<const char *>((void *)&b), 1);  // 直接写入，无需转换
+}
+```
+
+而多字节整数需要转换：
+
+```cpp
+// MsgBuffer.cc 第 80-84 行
+void MsgBuffer::appendInt16(const uint16_t s) {
+    uint16_t ss = htons(s);  // 主机序 → 网络序（大端）
+    append(static_cast<const char *>((void *)&ss), 2);
+}
+```
+
+同理，`peekInt8` 也不调用 `ntoh` 系列函数，直接读取那一个字节的值即可。这是网络编程的基本约定——只有 2 字节及以上的整数才需要做字节序转换。
+
+---
+*学习日期：2026-04-02 | 上一课：[第01课_日志系统](第01课_日志系统.md) | 下一课：[第03课_日期时间与工具函数](第03课_日期时间与工具函数.md)*

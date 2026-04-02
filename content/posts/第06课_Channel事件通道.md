@@ -351,6 +351,16 @@ EventLoop ←──────── Channel ──────── Poller
 
 ---
 
+## 核心收获
+
+- Channel 不拥有 fd，只是 fd 的事件注册与回调分发代理，生命周期由持有者（如 TcpConnection）管理
+- `tie(shared_ptr)` 防止 Channel 在 `handleEvent()` 中途被析构：持有所有者的 weak_ptr，执行回调前 lock()
+- 三种状态 kNew/kAdded/kDeleted 驱动 `epoll_ctl` 的 ADD/MOD/DEL 操作
+- `enableReading/Writing()` 修改 events_ 后调用 `update()` → `loop_->updateChannel()` → Poller 同步
+- `disableAll()` + `remove()` 是安全移除 Channel 的标准两步流程（先停止监听，再从 Poller 注销）
+
+---
+
 ## 十一、思考题
 
 1. Channel 的 `fd_` 是 `const int`，为什么不允许修改？（提示：Poller 用 fd 做 key）
@@ -360,14 +370,201 @@ EventLoop ←──────── Channel ──────── Poller
 
 ---
 
-*学习日期：2026-04-01 | 上一课：[第05课_EventLoop事件循环](第05课_EventLoop事件循环.md) | 下一课：[第07课_Poller多路复用](第07课_Poller多路复用.md)*
+## 十二、思考题参考答案
+
+### 1. Channel 的 `fd_` 是 `const int`，为什么不允许修改？
+
+**根本原因：fd 是 Channel 在 Poller 中的唯一标识，修改会导致映射关系断裂。**
+
+看 Channel.h 第 302 行的声明：
+
+```cpp
+const int fd_;
+```
+
+以及 EpollPoller 中 `fd` 的使用方式：
+
+1. **Debug 模式的 `channels_` map 以 fd 为 key**（EpollPoller.cc 第 147-151 行）：
+```cpp
+channels_[fd] = channel;  // fd → Channel* 的映射
+```
+
+2. **`epoll_ctl` 以 fd 为参数**（EpollPoller.cc 第 210 行）：
+```cpp
+::epoll_ctl(epollfd_, operation, fd, &event);
+```
+
+3. **KQueue 的 `channels_` 也以 fd 为 key**（KQueue.cc 第 183 行）：
+```cpp
+channels_[fd] = {events, channel};
+```
+
+4. **PollPoller 的 `pollfds_` 数组中存的是 fd**（PollPoller.cc 第 101-102 行）：
+```cpp
+pfd.fd = channel->fd();
+```
+
+如果允许修改 `fd_`，会导致以下灾难性问题：
+
+- **映射不一致**：Channel 已经用 `fd=5` 注册到了 Poller 的 `channels_[5] = this`。如果修改 `fd_` 为 7，此后 `channel->fd()` 返回 7，但 Poller 还认为这个 Channel 对应 fd=5。执行 `update()` 时传给 `epoll_ctl` 的是 fd=7，但内核中注册的是 fd=5——两边不匹配。
+- **`remove()` 找不到自己**：`remove` 通过 `channels_.erase(fd)` 删除映射，如果 fd 已变，就删不掉原来的映射，导致**内存泄漏**（map 中残留无效指针）。
+- **fd 复用风险**：如果旧 fd 被 close 后被系统重新分配给新连接，Poller 还保存着旧 Channel 的映射 `channels_[旧fd]`，新连接的 Channel 注册时会冲突。
+
+**正确做法**：如果需要关联到新的 fd，应该销毁旧 Channel 并创建新的。fd 和 Channel 是一对一绑定关系，整个生命周期不可变。这也是为什么 Channel 的构造函数直接将 fd 设为 `const`（Channel.cc 第 36-38 行）：
+
+```cpp
+Channel::Channel(EventLoop *loop, int fd)
+    : loop_(loop), fd_(fd), events_(0), revents_(0), index_(-1), tied_(false)
+```
 
 ---
 
-## 核心收获
+### 2. `enableWriting()` 之后为什么必须在发送完成后 `disableWriting()`？
 
-- Channel 不拥有 fd，只是 fd 的事件注册与回调分发代理，生命周期由持有者（如 TcpConnection）管理
-- `tie(shared_ptr)` 防止 Channel 在 `handleEvent()` 中途被析构：持有所有者的 weak_ptr，执行回调前 lock()
-- 三种状态 kNew/kAdded/kDeleted 驱动 `epoll_ctl` 的 ADD/MOD/DEL 操作
-- `enableReading/Writing()` 修改 events_ 后调用 `update()` → `loop_->updateChannel()` → Poller 同步
-- `disableAll()` + `remove()` 是安全移除 Channel 的标准两步流程（先停止监听，再从 Poller 注销）
+**不关掉写事件会导致 epoll busy loop（空转），CPU 100%。**
+
+trantor 使用的是 **LT（水平触发）** 模式——`epoll_event.events` 中没有设置 `EPOLLET` 标志（参见 EpollPoller.cc 第 207 行 `event.events = channel->events()`，只有 `POLLIN | POLLOUT`，无 `EPOLLET`）。
+
+LT 模式的行为：**只要 fd 的条件满足，每次 `epoll_wait` 都会返回该事件**。
+
+对于 `POLLOUT`（可写事件），"条件满足"意味着**内核发送缓冲区有空闲空间**。而 TCP 的发送缓冲区在大部分时间都是有空间的（默认 128KB~数 MB），只有在对端接收很慢、缓冲区堆满时才会"不可写"。
+
+如果发送完数据后不 `disableWriting()`：
+
+```
+循环1: epoll_wait → POLLOUT 就绪 → writeCallback_() → 发现没有数据要发 → 返回
+循环2: epoll_wait → 缓冲区仍有空间 → POLLOUT 就绪 → writeCallback_() → 没数据 → 返回
+循环3: epoll_wait → 又返回 → ...
+（无限循环，CPU 100%）
+```
+
+`epoll_wait` 的超时形同虚设——因为每次调用都会立即返回（有可写事件），主循环变成了不停地调用 `epoll_wait` → `handleEvent` → `doRunInLoopFuncs` → `epoll_wait` ...
+
+**正确的写事件使用模式**：
+
+```
+① 有数据要发：先尝试直接 write
+② write 返回 EAGAIN（缓冲区满）：把剩余数据放入用户态发送缓冲区，enableWriting()
+③ POLLOUT 触发：从用户态缓冲区取数据继续 write
+④ 所有数据发完：disableWriting() ← 关键！
+```
+
+这也是为什么 TcpConnection 的 `handleWrite()` 在缓冲区写空后一定会调用 `channel_->disableWriting()`。
+
+---
+
+### 3. `tie()` 使用 `weak_ptr<void>` 而不是 `weak_ptr<TcpConnection>` 的好处
+
+**核心好处：类型擦除，Channel 不依赖 TcpConnection 的定义。**
+
+看 Channel.h 第 269-273 行和第 312 行：
+
+```cpp
+void tie(const std::shared_ptr<void> &obj) {
+    tie_ = obj;    // weak_ptr<void>
+    tied_ = true;
+}
+// ...
+std::weak_ptr<void> tie_;
+```
+
+如果改成 `weak_ptr<TcpConnection>`，会导致以下问题：
+
+1. **循环依赖**：Channel.h 需要 `#include "TcpConnection.h"`（或至少前向声明 + 完整定义在 .cc 中）。而 TcpConnection 已经包含了 Channel（`unique_ptr<Channel>`），形成 `Channel.h ↔ TcpConnection.h` 的循环头文件依赖。虽然可以用前向声明缓解，但 `weak_ptr<T>` 的 `lock()` 需要完整类型定义。
+
+2. **Channel 的通用性丧失**：Channel 不仅被 TcpConnection 使用，还被以下对象使用：
+   - `EventLoop` 自己的 `wakeupChannelPtr_`（绑定到 EventLoop，不是 TcpConnection）
+   - `TimerQueue` 内部的 timerfd Channel（Linux）
+   - `Acceptor` 的监听 Channel
+
+   这些持有者都不是 TcpConnection。如果 `tie` 只接受 `TcpConnection`，这些场景就无法使用 `tie` 机制。
+
+3. **`weak_ptr<void>` 的转换是安全的**：C++ 标准保证 `shared_ptr<Derived>` 可以隐式转换为 `shared_ptr<void>`，且转换后 `weak_ptr<void>::lock()` 返回的 `shared_ptr<void>` 仍然持有正确的引用计数和正确的删除器。也就是说，类型信息只在析构时需要——而析构器（deleter）在 `shared_ptr` 创建时就被捕获了，与 `void` 转换无关。
+
+4. **符合最小知识原则**：Channel 只关心"持有者是否还活着"，不关心持有者的具体类型。`handleEvent` 里只做 `tie_.lock()` 检查是否为空：
+
+```cpp
+std::shared_ptr<void> guard = tie_.lock();  // 只需知道 "活着" 还是 "死了"
+if (guard) {
+    handleEventSafely();  // guard 续命，保证回调期间不析构
+}
+```
+
+这是一种经典的**类型擦除**设计模式，让底层组件（Channel）不依赖上层组件（TcpConnection）的具体类型，实现了依赖反转。
+
+---
+
+### 4. `readCallback_` 中调用 `disableAll()` + `remove()`，Channel 会立刻析构吗？
+
+**不会立刻析构。原因有两层保护。**
+
+**第一层保护：`tie()` 的 `guard`**
+
+回顾 `handleEvent()` 的调用链（Channel.cc 第 53-69 行）：
+
+```cpp
+void Channel::handleEvent()
+{
+    if (events_ == kNoneEvent) return;
+    if (tied_) {
+        std::shared_ptr<void> guard = tie_.lock();  // 引用计数 +1
+        if (guard) {
+            handleEventSafely();  // ← readCallback_ 在这里被调用
+        }
+    }
+    else {
+        handleEventSafely();
+    }
+    // guard 在这里析构，引用计数 -1
+}
+```
+
+`guard` 是一个局部 `shared_ptr<void>`，在 `handleEvent()` 整个函数作用域内持有 TcpConnection 的引用。即使 `readCallback_` 内部导致 TcpConnection 的其他所有 `shared_ptr` 被释放，`guard` 仍然保持引用计数 >= 1，TcpConnection 不会析构。
+
+TcpConnection 不析构 → 它持有的 `unique_ptr<Channel>` 不析构 → Channel 不析构。
+
+**第二层保护：`disableAll()` + `remove()` 只修改状态，不析构**
+
+看这两个操作做了什么：
+
+```cpp
+// disableAll()（Channel.h 第 165-169 行）
+void disableAll() {
+    events_ = kNoneEvent;
+    update();  // → epoll_ctl(EPOLL_CTL_DEL) 从内核移除
+}
+
+// remove()（Channel.cc 第 41-46 行）
+void Channel::remove() {
+    assert(events_ == kNoneEvent);
+    addedToLoop_ = false;
+    loop_->removeChannel(this);  // → 从 Poller 的 channels_ map 移除，setIndex(kNew)
+}
+```
+
+这两步操作都只是修改了 Channel 的状态和 Poller 的内部映射，**不涉及 Channel 对象本身的 delete/析构**。Channel 的生命周期完全由持有它的 `unique_ptr`（在 TcpConnection 中）管理。
+
+**完整时序分析**：
+
+```
+① EventLoop::loop() 遍历 activeChannels_
+② channel->handleEvent()
+③   guard = tie_.lock()       → 引用计数 N+1
+④   handleEventSafely()
+⑤     readCallback_() 执行
+⑥       channel->disableAll()  → events_ = 0, epoll_ctl DEL（只改状态）
+⑦       channel->remove()      → 从 Poller map 删除（只改映射）
+⑧     readCallback_() 返回
+⑨   guard 析构                → 引用计数回 N
+⑩ 遍历下一个 Channel
+
+Channel 在整个过程中始终存活。
+直到后续 TcpConnection 真正析构时（所有 shared_ptr 归零），
+Channel 才会随着 unique_ptr 析构而被 delete。
+```
+
+**如果没有 `tie()` 机制呢？** 如果 Channel 没有调用 `tie()`（`tied_ == false`），`handleEventSafely()` 直接执行，没有 `guard` 保护。此时如果 `readCallback_` 内部触发了 TcpConnection 的析构（比如这是最后一个 `shared_ptr`），Channel 确实会被析构——在自己的成员函数还没返回时！这就是经典的"回调中自杀"问题，会导致未定义行为。所以 `tie()` 机制不是可选的——对于 TcpConnection 拥有的 Channel，它是必须的安全保障。
+
+---
+
+*学习日期：2026-04-08 | 上一课：[第05课_EventLoop事件循环](第05课_EventLoop事件循环.md) | 下一课：[第07课_Poller多路复用](第07课_Poller多路复用.md)*

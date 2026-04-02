@@ -415,6 +415,14 @@ resolver->resolve("api.game.com",
     });
 ```
 
+## 核心收获
+
+- `NormalResolver`：`getaddrinfo`（阻塞）→ `ConcurrentTaskQueue`（8线程池）→ **回调在工作线程**，必须 `runInLoop` 回归 EventLoop 再操作连接
+- `AresResolver`：c-ares DNS socket 封装为 `Channel` 注册到 epoll，**回调直接在 EventLoop 线程**，无需切回
+- 全局 Meyers Singleton 缓存：`NormalResolver` 所有实例共享一个缓存和线程池，避免重复解析
+- `timeout=0` 反直觉：c-ares 中 timeout=0 意为 TTL 最大值无上限（永不过期），而非"立即超时"
+- 高频 DNS 场景用 `AresResolver`；简单低频查询用 `NormalResolver`（更简单，依赖更少）
+
 ---
 
 ## 八、思考题
@@ -429,14 +437,193 @@ resolver->resolve("api.game.com",
 
 ---
 
-*学习日期：2026-04-02 | 上一课：[第15课_TLS安全通信](第15课_TLS安全通信.md) | 下一课：[第17课_并发工具与对象池](第17课_并发工具与对象池.md)*
+## 九、思考题参考答案
+
+### 1. NormalResolver 与 AresResolver 回调线程差异的后果
+
+**问题场景**：
+
+```cpp
+// 用户代码——不区分两种 Resolver 的回调线程
+resolver->resolve("game.server.com", [conn](const InetAddress &addr) {
+    // 直接操作 TcpConnection
+    conn->send("Resolved: " + addr.toIpPort());   // 危险！
+});
+```
+
+**使用 AresResolver 时**：回调在 EventLoop 线程调用。如果 `conn` 恰好属于这个 EventLoop，操作是安全的。
+
+**使用 NormalResolver 时**：回调在 `ConcurrentTaskQueue` 的工作线程调用。此时 `conn->send()` 是从非 EventLoop 线程调用的。`TcpConnectionImpl::send()` 内部虽然有 `runInLoop` 保护（会检测是否在 loop 线程，不在则投递），但其他操作如直接读取 `conn` 的成员变量（如 `conn->getRecvBuffer()`）则没有这层保护，会产生数据竞争。更危险的是，如果用户在回调中直接操作 `EventLoop` 上的其他对象（如修改路由表、操作其他连接的映射表），没有任何锁保护，会导致**未定义行为**——可能是崩溃、数据损坏，也可能偶尔"正常"但在高并发时突然出问题。
+
+**具体症状**：
+- 低频调用时可能"正常工作"（竞态窗口小，不容易触发）
+- 高并发时出现间歇性崩溃（野指针、double free）
+- `valgrind`/`ThreadSanitizer` 检测到 data race
+
+**trantor 的 API 设计是否应该统一？**
+
+从纯设计角度，应该统一——`NormalResolver` 的回调也应该通过 `loop->runInLoop()` 回到 EventLoop 线程。但 trantor 没有这样做，原因是：
+
+1. `NormalResolver` 不持有 `EventLoop*`——`Resolver::newResolver(EventLoop*, timeout)` 中的 `loop` 参数在 `NormalResolver` 实现中被忽略了（源码可见 `newResolver` 直接忽略了第一个参数）。
+2. 如果要回调到 EventLoop，需要知道"回调到哪个 EventLoop"，但 DNS 解析是全局共享的（多个 EventLoop 线程都可能发起解析），无法确定应该回调到哪个。
+3. `AresResolver` 有自己的 EventLoop（全局静态 `EventLoopThread`），回调自然在那个线程——但这也不是用户连接所在的 EventLoop。
+
+**实际的最佳实践**：无论用哪种 Resolver，回调中都应该用 `runInLoop` 切回目标 EventLoop：
+
+```cpp
+resolver->resolve("game.server.com", [loop, conn](const InetAddress &addr) {
+    loop->runInLoop([conn, addr]() {
+        conn->send("Resolved: " + addr.toIpPort());  // 安全
+    });
+});
+```
+
+这是使用 trantor DNS API 的**正确姿势**，框架文档应该强调这一点。
+
+### 2. DNS 查询线程数多于 CPU 核心数为什么合理
+
+**关键洞察：`getaddrinfo` 是 I/O 密集型而非 CPU 密集型操作。**
+
+`getaddrinfo()` 的执行过程：
+1. 查询本地 `/etc/hosts` 文件（几乎瞬间）
+2. 查询本地 DNS 缓存 `nscd`（如果有，几乎瞬间）
+3. 向 DNS 服务器发送 UDP 请求（网络 I/O）
+4. **等待 DNS 服务器响应**（主要耗时：通常 1ms~100ms，极端情况数秒）
+5. 解析响应（几乎瞬间）
+
+在步骤 4 中，线程处于阻塞状态（`recvfrom` 系统调用等待网络数据），**不占用任何 CPU 资源**。这和 CPU 密集型计算（如哈希计算、图像处理）完全不同。
+
+**线程数 vs CPU 核心数的关系**：
+
+- **CPU 密集型任务**：线程数 = CPU 核心数 是最优的。更多线程只会增加上下文切换开销，不会提高吞吐量。
+- **I/O 密集型任务**：线程数可以远大于 CPU 核心数。因为大部分时间线程在等待 I/O（不用 CPU），多个线程可以**交叠等待**：线程 A 在等 DNS 响应时，线程 B 可以开始发 DNS 请求，线程 C 在处理收到的响应。
+
+**为什么最少 8 个线程**：
+
+```cpp
+static ConcurrentTaskQueue& concurrentTaskQueue() {
+    static ConcurrentTaskQueue queue(
+        std::thread::hardware_concurrency() < 8
+            ? 8
+            : std::thread::hardware_concurrency(),
+        "Dns Queue");
+    return queue;
+}
+```
+
+假设 4 核 CPU，DNS 查询平均耗时 10ms（其中 9.5ms 是网络等待）：
+- 4 个线程：同一时刻最多 4 个 DNS 查询并发，其中 CPU 实际只需要 4 * 0.5ms = 2ms 的计算资源
+- 8 个线程：同一时刻最多 8 个 DNS 查询并发，CPU 实际需要 8 * 0.5ms = 4ms，4 核完全够用
+
+8 个线程可以实现更高的 DNS 查询并发度，而 CPU 开销微乎其微。如果只用 4 个线程，在突发大量 DNS 查询时（如服务器启动阶段解析多个后端地址），前 4 个查询占满线程后，后续查询必须排队等待，增加了总体延迟。
+
+### 3. 永不过期缓存对 DNS Round Robin 的影响
+
+**DNS Round Robin 的工作原理**：
+
+DNS 服务器对同一域名返回多个 IP，每次查询轮换顺序，实现简单的负载均衡：
+
+```
+第 1 次查询 api.game.com → [IP-A, IP-B, IP-C]
+第 2 次查询 api.game.com → [IP-B, IP-C, IP-A]
+第 3 次查询 api.game.com → [IP-C, IP-A, IP-B]
+```
+
+**`timeout=0`（永不过期）的问题**：
+
+1. **负载不均**：第一次查询缓存了 `[IP-A, IP-B, IP-C]`，之后所有查询都返回这个缓存结果。如果客户端总是选第一个 IP（`addrs[0]`），那所有流量都会打到 IP-A，其他 IP 空闲。
+2. **故障无法感知**：如果 IP-A 对应的服务器宕机，DNS 管理员把 IP-A 从记录中移除，但 trantor 的缓存仍然返回包含 IP-A 的旧列表，客户端可能继续尝试连接已宕机的服务器。
+3. **扩容无法生效**：新增服务器 IP-D 加入 DNS 记录，但缓存中没有 IP-D，新服务器得不到流量。
+
+**在 trantor 框架下的解决方案**：
+
+1. **设置合理的 timeout**：
+   ```cpp
+   // 60 秒缓存——DNS TTL 通常就是 60~300 秒
+   auto resolver = Resolver::newResolver(nullptr, 60);
+   ```
+
+2. **客户端侧随机化**：即使缓存命中，客户端在多个 IP 中随机选取而不是总用第一个：
+   ```cpp
+   resolver->resolve("api.game.com",
+       [](const std::vector<InetAddress> &addrs) {
+           auto &selected = addrs[rand() % addrs.size()];  // 随机选
+           // 连接 selected
+       });
+   ```
+
+3. **主动刷新缓存**：可以扩展 `Resolver` 接口增加 `invalidateCache(hostname)` 方法，在检测到连接失败时主动清除对应的缓存条目：
+   ```cpp
+   // 连接失败时
+   resolver->invalidateCache("api.game.com");
+   resolver->resolve("api.game.com", retryCallback);
+   ```
+
+4. **注意 `timeout=0` 的反直觉语义**：代码中 `timeout=0` 是"永不过期"而不是"不缓存"。如果需要"每次都真正查询 DNS"，需要修改源码：当 `timeout` 为某个特殊值（如 `SIZE_MAX`）时跳过缓存查找。
+
+### 4. 静态析构阶段调用 DNS 解析的灾难
+
+**C++ 静态析构顺序问题（Static Destruction Order Fiasco）**：
+
+`AresResolver` 使用的全局 `EventLoopThread` 通过 Meyers' Singleton 惰性初始化：
+
+```cpp
+static EventLoop* getLoop() {
+    static EventLoopThread loopThread;   // 静态局部变量
+    loopThread.run();
+    return loopThread.getLoop();
+}
+```
+
+同样，`NormalResolver` 的全局 `ConcurrentTaskQueue` 也是静态局部变量：
+
+```cpp
+static ConcurrentTaskQueue& concurrentTaskQueue() {
+    static ConcurrentTaskQueue queue(8, "Dns Queue");
+    return queue;
+}
+```
+
+**当 `main()` 结束后**，C++ 运行时按照**与构造相反的顺序**析构静态对象。但如果一个静态对象在析构时触发 DNS 解析，可能出现以下情况：
+
+1. **EventLoopThread 已析构**：全局 `loopThread` 的析构会停止 EventLoop 并 join 线程。此后 `getLoop()` 返回的 `EventLoop*` 指向已析构的对象——**悬空指针**。在上面注册定时器、投递任务会导致段错误或未定义行为。
+
+2. **ConcurrentTaskQueue 已析构**：`concurrentTaskQueue()` 返回的引用指向已析构的对象，`runTaskInQueue` 操作已释放的 `std::mutex` 和 `std::condition_variable`——**未定义行为**，通常表现为段错误或死锁。
+
+3. **DNS 全局缓存已析构**：`globalCache()` 返回的 `unordered_map` 已析构，对其 `find` 操作是未定义行为。
+
+**具体的崩溃场景**：
+
+```cpp
+// 全局对象
+class GameService {
+    std::shared_ptr<Resolver> resolver_;
+    TcpClient client_;
+public:
+    ~GameService() {
+        // main() 结束后的静态析构阶段
+        resolver_->resolve("shutdown.notify.com", [](const InetAddress &addr) {
+            // 发送关服通知
+        });
+        // 此时 DNS 的全局 EventLoopThread/ConcurrentTaskQueue 可能已经被析构了！
+    }
+};
+static GameService service;  // 全局静态对象
+```
+
+**析构顺序依赖**：
+- `service` 在 `main()` 前构造
+- `loopThread` 在第一次 `getLoop()` 调用时构造（可能在 `main()` 执行期间）
+- 析构时按相反顺序：`loopThread` 先析构，`service` 后析构
+- `service` 析构时调用 DNS → 访问已析构的 `loopThread` → 崩溃
+
+**如何避免**：
+
+1. **不在静态析构阶段做 I/O 操作**：这是 C++ 的通用最佳实践。所有需要网络 I/O 的清理操作应在 `main()` 返回前显式完成。
+2. **使用"永不析构"的单例**：将 `static EventLoopThread loopThread` 改为 `static EventLoopThread *loopThread = new EventLoopThread`——堆上分配，故意不 delete，程序退出时由 OS 回收。这是 Google C++ 风格指南推荐的做法。
+3. **引用计数保活**：让所有可能在静态析构阶段使用 DNS 的对象持有 `shared_ptr` 到 Resolver 相关资源，确保最后一个使用者析构时才释放。
+4. **最简单的方案**：在 `main()` 末尾显式调用 `service.shutdown()` 而不是依赖析构函数。
 
 ---
 
-## 核心收获
-
-- `NormalResolver`：`getaddrinfo`（阻塞）→ `ConcurrentTaskQueue`（8线程池）→ **回调在工作线程**，必须 `runInLoop` 回归 EventLoop 再操作连接
-- `AresResolver`：c-ares DNS socket 封装为 `Channel` 注册到 epoll，**回调直接在 EventLoop 线程**，无需切回
-- 全局 Meyers Singleton 缓存：`NormalResolver` 所有实例共享一个缓存和线程池，避免重复解析
-- `timeout=0` 反直觉：c-ares 中 timeout=0 意为 TTL 最大值无上限（永不过期），而非"立即超时"
-- 高频 DNS 场景用 `AresResolver`；简单低频查询用 `NormalResolver`（更简单，依赖更少）
+*学习日期：2026-05-03 | 上一课：[第15课_TLS安全通信](第15课_TLS安全通信.md) | 下一课：[第17课_并发工具与对象池](第17课_并发工具与对象池.md)*

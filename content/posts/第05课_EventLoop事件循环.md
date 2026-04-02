@@ -508,6 +508,14 @@ loop->runAfter(1.0, [conn]() {
 });
 ```
 
+## 核心收获
+
+- **核心不变量**：EventLoop 是单线程的，所有网络 I/O 操作必须在其所属线程执行
+- `runInLoop(f)`：当前线程直接执行；其他线程 → `queueInLoop` → 写入 `MpscQueue` → 唤醒 → 下轮执行
+- `wakeupFd_`（eventfd/pipe）：跨线程投递任务后写入触发 epoll，唤醒阻塞的 `poll()` 调用
+- `MpscQueue<Func> funcs_`：任务队列采用无锁 MPSC 队列，多线程并发投递不需要 mutex
+- 游戏服务器铁律：EventLoop 线程只做非阻塞 I/O 和轻量计算，数据库/文件操作必须卸载到 TaskQueue
+
 ---
 
 ## 十二、思考题
@@ -519,14 +527,153 @@ loop->runAfter(1.0, [conn]() {
 
 ---
 
-*学习日期：2026-04-01 | 上一课：[第04课_回调类型定义](第04课_回调类型定义.md) | 下一课：[第06课_Channel事件通道](第06课_Channel事件通道.md)*
+## 十三、思考题参考答案
+
+### 1. `runInLoop` 在 Loop 线程直接执行 `f()` 可能导致什么问题？
+
+**核心风险：在 `handleEvent` 回调中直接操作当前正在遍历的 Channel，破坏遍历不变量。**
+
+看 `runInLoop` 的实现（EventLoop.h 第 126-136 行）：
+
+```cpp
+template <typename Functor>
+inline void runInLoop(Functor &&f)
+{
+    if (isInLoopThread())
+        f();              // 直接执行！
+    else
+        queueInLoop(std::forward<Functor>(f));
+}
+```
+
+当 Loop 线程处于 `handleEvent` 阶段（EventLoop.cc 第 229-236 行），正在遍历 `activeChannels_` 列表时：
+
+```cpp
+eventHandling_ = true;
+for (auto it = activeChannels_.begin(); it != activeChannels_.end(); ++it)
+{
+    currentActiveChannel_ = *it;
+    currentActiveChannel_->handleEvent();  // ← 如果这里面调用了 runInLoop...
+}
+```
+
+假设 Channel A 的 `readCallback_` 内调用了 `runInLoop(f)`，而 `f` 内部执行了：
+- `channelB->disableAll()` + `channelB->remove()` — 删除了 Channel B
+- Channel B 恰好也在本轮 `activeChannels_` 中，尚未被遍历到
+
+此时 `f()` 被**立即同步执行**，Channel B 被移除甚至析构，后续遍历到 Channel B 时就是**悬空指针**。
+
+**如果走 `queueInLoop` 路径**，`f` 会被推迟到 `doRunInLoopFuncs()` 阶段执行，此时 `activeChannels_` 的遍历早已结束，不存在迭代器失效问题。
+
+**trantor 的防御措施**：
+1. `tie()` 机制通过 `weak_ptr::lock()` 防止对象在 `handleEvent` 执行期间被析构
+2. `Channel::handleEvent()` 检查 `events_ == kNoneEvent` 直接返回（Channel.cc 第 56 行），即使 Channel 已被 `disableAll()`，只要内存还在就不会崩溃
+3. `currentActiveChannel_` 记录当前正在处理的 Channel，方便调试
+
+**实际中这通常不是问题**的原因是：trantor 的设计让同一个 fd 的所有操作都通过同一个 Channel，不太会出现"A 的回调删除 B"的情况。但理论上这是直接执行的固有风险。
 
 ---
 
-## 核心收获
+### 2. `MpscQueue` 使用链表而非环形数组的优缺点
 
-- **核心不变量**：EventLoop 是单线程的，所有网络 I/O 操作必须在其所属线程执行
-- `runInLoop(f)`：当前线程直接执行；其他线程 → `queueInLoop` → 写入 `MpscQueue` → 唤醒 → 下轮执行
-- `wakeupFd_`（eventfd/pipe）：跨线程投递任务后写入触发 epoll，唤醒阻塞的 `poll()` 调用
-- `MpscQueue<Func> funcs_`：任务队列采用无锁 MPSC 队列，多线程并发投递不需要 mutex
-- 游戏服务器铁律：EventLoop 线程只做非阻塞 I/O 和轻量计算，数据库/文件操作必须卸载到 TaskQueue
+**链表方案的优点**：
+
+1. **无需预分配固定大小**：环形数组（如 `boost::lockfree::spsc_queue`）需要在创建时指定容量。如果容量不够，入队操作要么阻塞要么失败；如果容量过大，浪费内存。链表天然无界——只要堆内存够，就能一直入队。对于 EventLoop 这种"突发大量任务投递"的场景（例如服务器同时收到大量新连接），无界队列更安全。
+
+2. **实现更简单**：无锁环形数组的 MPSC 实现需要处理复杂的 wrap-around（环绕）逻辑，且要用 CAS 循环来抢占槽位。链表只需一次 `exchange` 原子操作即可入队：
+
+```cpp
+// LockFreeQueue.h 第 56-57 行
+BufferNode *prevhead{head_.exchange(node, std::memory_order_acq_rel)};
+prevhead->next_.store(node, std::memory_order_release);
+```
+
+3. **无假满问题**：环形数组中如果消费者不够快，生产者会看到"队列满"。而链表不存在这个问题。
+
+**链表方案的缺点**：
+
+1. **每次入队/出队都有 `new`/`delete`**：每个任务入队时 `new BufferNode` + `new T`（LockFreeQueue.h 第 55 行），出队时 `delete dataPtr_` + `delete tail`（第 83-85 行）。频繁的堆分配/释放会产生：
+   - 内存碎片
+   - malloc/free 本身的锁争用（glibc malloc 内部有锁，虽然 tcmalloc/jemalloc 缓解了这个问题）
+   - Cache miss：链表节点在堆上随机分布，不像数组那样连续
+
+2. **缓存不友好**：环形数组的元素在内存中连续存放，CPU 缓存预取效果好（spatial locality）。链表节点散布在堆上，每次 `dequeue` 都可能产生 cache miss。
+
+3. **内存开销更大**：每个节点额外存储一个 `atomic<BufferNode*> next_` 和一个 `T* dataPtr_` 指针，比数组直接存 `T` 多了两个指针（16 字节/节点在 64 位系统上）。
+
+**trantor 的选择理由**：EventLoop 的任务队列并非超高频热路径（不是每个数据包都走队列，大部分操作是 Loop 线程内直接执行的）。无界 + 实现简单的优势大于缓存友好性的劣势。如果换成环形数组，还需要额外处理"队列满了怎么办"的策略，反而增加复杂度。
+
+---
+
+### 3. `wakeup()` 写入的值会不会"丢失"？
+
+**不会丢失，下次循环一定能正确处理。**
+
+分析具体时序：
+
+```
+时刻 T1: Loop 线程在执行 doRunInLoopFuncs()（不在 epoll_wait）
+时刻 T2: 其他线程调用 quit()
+         → quit_.store(true)
+         → wakeup() → write(wakeupFd_, 1)
+时刻 T3: Loop 线程 doRunInLoopFuncs() 执行完毕
+时刻 T4: 回到 while 循环顶部检查 quit_
+```
+
+**情况分析**：
+
+**Linux `eventfd` 的语义**：`eventfd` 内部维护一个 `uint64_t` 计数器。`write` 操作会**累加**到计数器上，`read` 操作会**读取并清零**。即使没有人立刻 `read`，写入的值不会丢失——它一直累积在内核的计数器中。
+
+在上面的时序中：
+- T2 写入 `wakeupFd_`，计数器变为 1
+- T3 `doRunInLoopFuncs()` 结束
+- T4 `while (!quit_.load(...))` — 这里 `quit_` 已经是 `true`，循环**直接退出**，根本不会再进入 `epoll_wait`
+
+所以 wakeup 写入的值虽然没人读，但也无所谓——`quit_` 标志已经可见，循环已退出。
+
+**另一种情况**：如果不是 `quit()` 而是 `queueInLoop(f)`：
+- T2 其他线程 `funcs_.enqueue(f)` + `wakeup()`
+- T3 `doRunInLoopFuncs()` 可能已经消费完本轮任务了
+- T4 回到 `while` 顶部 → `poller_->poll()` → `epoll_wait`
+- 此时 `wakeupFd_` 已经有数据（T2 写入的），`epoll_wait` **立即返回**
+- `wakeupRead()` 消费掉计数器
+- `doRunInLoopFuncs()` 消费 `f`
+
+**关键点**：`eventfd` 写入的值永远不会丢失。最差情况就是 `epoll_wait` 立即返回一次，代价只是多一轮空循环，完全正确且安全。
+
+**macOS/BSD `pipe` 的情况类似**：`pipe` 有内核缓冲区（通常 64KB），写入的字节会一直保存直到被读取。只要不溢出（而每次只写 8 字节），就不会丢失。
+
+---
+
+### 4. 为什么用 `atomic<bool>` 而不是 `bool` + `mutex`？
+
+**`atomic<bool>` 的优势**：
+
+1. **性能**：`atomic<bool>` 在 x86 上编译为普通的 `mov` 指令加上内存屏障（fence），没有锁的开销。而 `mutex` 的 `lock()/unlock()` 即使没有竞争，也要执行 `futex` 系统调用（Linux）或至少一次原子 CAS + 分支。在 EventLoop 的主循环中，`quit_` 每一轮都要检查，`looping_` 在析构函数中可能被自旋检查——这些是热路径，`atomic` 比 `mutex` 快一个数量级。
+
+2. **不会死锁**：`quit_` 的使用场景是跨线程的简单标志读写。如果用 `mutex`，需要在 `quit()` 设置时加锁、在 `loop()` 检查时加锁。假设某个回调函数内部调用了 `quit()`，而这个回调恰好也持有了该 `mutex`——就会死锁。`atomic` 完全不存在这个问题。
+
+3. **语义匹配**：`looping_` 和 `quit_` 只是简单的 `bool` 标志，操作只有 `load` 和 `store`，不需要"检查-修改-写回"这样的复合操作。这正是 `atomic<bool>` 的最佳适用场景。`mutex` 适合保护**多步骤复合操作**（例如"读取余额→扣减→写回"），用它来保护单个 `bool` 是大材小用。
+
+4. **等待唤醒的成本**：如果用 `mutex` + `condition_variable`，析构函数里等待 `looping_` 变 `false` 需要用条件变量通知。而源码中析构函数用的是简单的自旋等待（EventLoop.cc 第 133-140 行）：
+
+```cpp
+while (looping_.load(std::memory_order_acquire))
+{
+    nanosleep(&delay, nullptr);  // 1ms 间隔自旋
+}
+```
+
+这种低频自旋（只在析构时发生一次）用 `atomic` 最简单。
+
+**`bool` + `mutex` 的优势（备选方案）**：
+
+1. **更强的顺序保证**：`mutex` 提供 sequentially consistent 语义（`lock` = acquire, `unlock` = release），不需要手动指定 `memory_order`，出错概率更低。
+2. **可配合条件变量**：如果需要"等到 `looping_` 变 false 再继续"这种等待，`condition_variable` 比自旋更节能。但析构只发生一次，自旋也可以接受。
+3. **调试友好**：`mutex` 可以配合工具检测死锁、竞争等问题（如 ThreadSanitizer）。`atomic` 的内存序错误更难排查。
+
+**结论**：对于简单的跨线程 `bool` 标志，`atomic<bool>` 是最优选择——性能好、无死锁风险、语义清晰。`mutex` 在这里是过度设计。
+
+---
+
+*学习日期：2026-04-06 | 上一课：[第04课_回调类型定义](第04课_回调类型定义.md) | 下一课：[第06课_Channel事件通道](第06课_Channel事件通道.md)*

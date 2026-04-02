@@ -490,6 +490,15 @@ conn->sendFile("/path/to/patch_v1.2.3.zip");
 // Linux 内部用 sendfile()，直接从磁盘到网卡，对服务器 CPU 几乎没有开销
 ```
 
+## 核心收获
+
+- 状态机 `Connecting→Connected→Disconnecting→Disconnected`，每个状态有严格的合法操作集合
+- `sendInLoop()` 快速路径：先尝试直接 `write()`，缓冲区空且无 EAGAIN 时无需经过写队列（减少一次拷贝）
+- `writeBufferList_` 多态节点：内存/文件/流/异步流均可混合排队，`sendfile()` 在 Linux 实现零拷贝
+- `shutdown()` 半关闭（`SHUT_WR`）vs `forceClose()` 立即关闭：优雅关闭等对端 FIN，强制关闭不等
+- `KickoffEntry` RAII：析构 = 调用 `forceClose()`，放入 `TimingWheel` 自动实现连接超时踢人
+- TLS 透明层：通过静态函数指针替换 read/write 路径，上层代码完全不感知加密
+
 ---
 
 ## 十三、思考题
@@ -504,15 +513,145 @@ conn->sendFile("/path/to/patch_v1.2.3.zip");
 
 ---
 
-*学习日期：2026-04-02 | 上一课：[第10课_Acceptor与Connector](第10课_Acceptor与Connector.md) | 下一课：[第12课_TcpServer与TcpClient](第12课_TcpServer与TcpClient.md)*
+## 十四、思考题参考答案
+
+### 1. 从非 IO 线程调用 `forceClose()` 是否会和 IO 线程的 `readCallback()` 竞争 `status_`？
+
+**不会竞争**，原因在于 `forceClose()` 内部使用了 `runInLoop` 机制。
+
+来看源码：
+
+```cpp
+void TcpConnectionImpl::forceClose()
+{
+    auto thisPtr = shared_from_this();
+    loop_->runInLoop([thisPtr]() {
+        if (thisPtr->status_ == ConnStatus::Connected ||
+            thisPtr->status_ == ConnStatus::Disconnecting)
+        {
+            thisPtr->status_ = ConnStatus::Disconnecting;
+            thisPtr->handleClose();
+            // ...
+        }
+    });
+}
+```
+
+关键在于 `loop_->runInLoop(...)` 的语义：
+- 如果当前已在 IO 线程（`isInLoopThread() == true`），lambda 会**立即同步执行**
+- 如果当前不在 IO 线程，lambda 会被放入 `pendingFunctors_` 队列，等待 IO 线程在本次或下次 `poll` 返回后按序执行
+
+而 `readCallback()` 也只在 IO 线程运行（开头有 `loop_->assertInLoopThread()`）。所以 `forceClose()` 中对 `status_` 的读写和 `readCallback()` 中对 `status_` 的读写**必然串行**——它们都在同一个 IO 线程的事件循环中按序执行，不存在并发访问。
+
+这就是 trantor（以及 muduo）"one loop per thread"模型的核心保证：**所有对连接内部状态的操作都在其所属的 IO 线程中串行执行**。`runInLoop` / `queueInLoop` 是跨线程安全投递操作的唯一入口，它把并发问题转化为了队列消费问题。`status_` 不需要加锁、不需要 `atomic`，因为它只有一个线程会读写。
+
+### 2. 调用 `shutdown()` 后又调用 `send()` 会发生什么？
+
+需要分两种情况分析。
+
+**情况一：`shutdown()` 的 lambda 先于 `send()` 的 lambda 执行**
+
+`shutdown()` 执行后，如果发送缓冲区为空，`status_` 会被置为 `Disconnecting`，并调用 `socketPtr_->closeWrite()`（即 `SHUT_WR`）。之后 `send()` 投递的 lambda 执行 `sendInLoop()` 时，开头就会检查状态：
+
+```cpp
+void TcpConnectionImpl::sendInLoop(const void *buffer, size_t length)
+{
+    loop_->assertInLoopThread();
+    if (status_ != ConnStatus::Connected)
+    {
+        LOG_DEBUG << "Connection is not connected,give up sending";
+        return;   // ← 直接返回，数据被丢弃
+    }
+    // ...
+}
+```
+
+`status_` 已经是 `Disconnecting`，不等于 `Connected`，所以 `sendInLoop` 直接返回，**数据被静默丢弃**，并打印 DEBUG 日志。
+
+**情况二：`shutdown()` 时发送缓冲区非空**
+
+此时 `shutdown()` 只设置 `closeOnEmpty_ = true` 并直接返回，`status_` 仍然是 `Connected`。那么后续 `send()` 的数据会正常追加到 `writeBufferList_` 中。当 `writeCallback()` 把所有数据发完后，检测到 `closeOnEmpty_`，再调用 `shutdown()`。此时缓冲区为空（刚发完），`shutdown()` 才真正执行 `SHUT_WR`。
+
+**也就是说：`shutdown()` 后再 `send()` 的数据也会被发出去**——这看起来可能不符合预期，但实际上 `shutdown()` 的语义就是"等发完再关"，而不是"从现在起拒绝发送"。
+
+**游戏服务器实践建议**：如果调用 `shutdown()` 后就不应该再发数据，应在业务层自行维护一个"正在关闭"标志，在 `send()` 前检查。不要依赖 trantor 的 `status_` 来阻止发送，因为 `closeOnEmpty_` 路径会让 `status_` 保持 `Connected`。
+
+### 3. `extendLife()` 节流是否会导致超时时间从 2 秒变成 3 秒？
+
+**最坏情况确实会延长约 1 秒，但不会到 3 秒。**
+
+分析最坏时序，假设超时 = 2 秒，数据每 0.5 秒来一次：
+
+```
+T=0.00s  第一次收包，extendLife() 执行
+         lastTimingWheelUpdateTime_ = 0.00
+         TimingWheel 插入 entry，deadline = T+2 = 2.00s
+
+T=0.50s  收包，now(0.50) < last(0.00)+1.0 = 1.00  → 被节流，不更新
+
+T=0.99s  收包，now(0.99) < last(0.00)+1.0 = 1.00  → 仍被节流
+
+T=1.00s  收包，now(1.00) >= last(0.00)+1.0 = 1.00  → 通过节流！
+         lastTimingWheelUpdateTime_ = 1.00
+         TimingWheel 插入 entry，deadline = T+2 = 3.00s
+
+T=1.50s  收包，now(1.50) < last(1.00)+1.0 = 2.00  → 被节流
+
+T=1.99s  收包，now(1.99) < last(1.00)+1.0 = 2.00  → 被节流
+
+T=2.00s  收包，now(2.00) >= last(1.00)+1.0 = 2.00  → 通过节流！
+         TimingWheel 插入 entry，deadline = T+2 = 4.00s
+         ...
+```
+
+可以看到，在 `T=1.00s` 之前的数据包（`T=0.50`, `T=0.99`）都被节流了，但 `T=1.00s` 时更新了 deadline 到 `3.00s`。只要数据持续到来，连接永远不会被超时踢出。
+
+**真正的风险场景是：最后一次收包恰好被节流。** 例如：
+
+```
+T=0.00s  extendLife() 更新，deadline = 2.00s
+T=0.50s  最后一次收包，被节流（此后再无数据）
+T=2.00s  TimingWheel 触发超时踢出
+```
+
+实际超时是"最后一次真实收包"后 1.5 秒（而不是精确的 2 秒）。最坏情况下，从最后一次收包到被踢出的时间范围是 `[timeout-1, timeout]` 秒，即 `[1, 2]` 秒。
+
+**不会变成 3 秒**——因为节流只是推迟了"更新 TimingWheel"的操作，而不是增加了额外的超时周期。只要在 `[lastUpdate, lastUpdate+1)` 期间有数据来，`lastUpdate+1` 时刻的那次收包就会更新 deadline。
+
+**设计取舍**：1 秒节流在高频收包场景（如每帧心跳 30-60 Hz）下可以减少大量的 TimingWheel 操作（从每秒 60 次降到 1 次），精度损失最多 1 秒，对于通常 30-300 秒的超时设置完全可以接受。但如果超时设置极短（如 2 秒），精度损失的比例就比较大（最多 50%），需要酌情调整。
+
+### 4. `KickoffEntry` 析构时 `forceClose()` 是否会导致双重关闭？
+
+**不会**，原因有两层保护。
+
+**第一层保护：`forceClose()` 的状态检查**
+
+```cpp
+void TcpConnectionImpl::forceClose()
+{
+    auto thisPtr = shared_from_this();
+    loop_->runInLoop([thisPtr]() {
+        if (thisPtr->status_ == ConnStatus::Connected ||
+            thisPtr->status_ == ConnStatus::Disconnecting)
+        {
+            thisPtr->status_ = ConnStatus::Disconnecting;
+            thisPtr->handleClose();
+            // ...
+        }
+    });
+}
+```
+
+如果连接已经在正常关闭流程中走过了 `handleClose()`，`status_` 已经变为 `Disconnected`。`forceClose()` 的 lambda 在 IO 线程执行时检查到 `status_ == Disconnected`，if 条件不满足，直接跳过，什么也不做。
+
+**第二层保护：`weak_ptr` 可能已经过期**
+
+`KickoffEntry` 持有的是 `weak_ptr<TcpConnection>`。如果连接已经完全关闭并析构（`TcpServer` 的 `connSet_` 已经 erase，`connectDestroyed()` 已经执行，所有 `shared_ptr` 都已释放），那么 `conn_.lock()` 返回空指针，`~KickoffEntry()` 中的 `if (conn)` 判断为 false，不会调用 `forceClose()`。
+
+不过需要注意一个细微情况：**连接可能正处于关闭流程中，`shared_ptr` 还没完全释放**。比如 `handleClose()` 已经将 `status_` 置为 `Disconnected`，但 `connectDestroyed()` 还在 `queueInLoop` 队列里等待执行，此时 `connSet_` 中还持有 `shared_ptr`。这种情况下 `weak_ptr::lock()` 成功，但 `forceClose()` 的 lambda 进入 IO 线程后发现 `status_ == Disconnected`，不做任何操作——依靠第一层保护。
+
+**总结**：`forceClose()` 是**幂等**的（多次调用等价于一次调用），因为它内部有状态检查守卫。`KickoffEntry` 析构触发的 `forceClose()` 在"连接已关闭"的情况下是一个安全的空操作（no-op）。这是 trantor 中很多关闭操作的通用模式——**状态机保证幂等性，`runInLoop` 保证线程安全性**。
 
 ---
 
-## 核心收获
-
-- 状态机 `Connecting→Connected→Disconnecting→Disconnected`，每个状态有严格的合法操作集合
-- `sendInLoop()` 快速路径：先尝试直接 `write()`，缓冲区空且无 EAGAIN 时无需经过写队列（减少一次拷贝）
-- `writeBufferList_` 多态节点：内存/文件/流/异步流均可混合排队，`sendfile()` 在 Linux 实现零拷贝
-- `shutdown()` 半关闭（`SHUT_WR`）vs `forceClose()` 立即关闭：优雅关闭等对端 FIN，强制关闭不等
-- `KickoffEntry` RAII：析构 = 调用 `forceClose()`，放入 `TimingWheel` 自动实现连接超时踢人
-- TLS 透明层：通过静态函数指针替换 read/write 路径，上层代码完全不感知加密
+*学习日期：2026-04-20 | 上一课：[第10课_Acceptor与Connector](第10课_Acceptor与Connector.md) | 下一课：[第12课_TcpServer与TcpClient](第12课_TcpServer与TcpClient.md)*

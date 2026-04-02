@@ -385,6 +385,14 @@ Socket 只做一件事：**保证 fd 被关闭**。不持有 EventLoop 指针，
 [玩家会话开始]
 ```
 
+## 核心收获
+
+- `InetAddress` 用 `union { sockaddr_in, sockaddr_in6 }` 统一 IPv4/IPv6，`getSockAddr()` 始终返回 `addr6_` 指针（两结构体起始字段布局兼容）
+- `isIntranetIp()` 用位移运算检测 RFC1918 私有地址段，比字符串解析快
+- `Socket` RAII 封装：析构自动 `close(fd_)`，不会因异常导致 fd 泄漏
+- Linux 原子创建非阻塞 socket：`SOCK_NONBLOCK | SOCK_CLOEXEC`，避免 `fcntl` 的竞态窗口
+- `accept4()` 原子接受并设置 NONBLOCK（Linux）；其他平台 `accept()` + `fcntl` 两步
+
 ---
 
 ## 八、思考题
@@ -399,10 +407,6 @@ Socket 只做一件事：**保证 fd 被关闭**。不持有 EventLoop 指针，
 
 ---
 
-*学习日期：2026-04-01 | 上一课：[第08课_定时器系统](第08课_定时器系统.md) | 下一课：[第10课_Acceptor与Connector](第10课_Acceptor与Connector.md)*
-
----
-
 ## 核心收获
 
 - `InetAddress` 用 `union { sockaddr_in, sockaddr_in6 }` 统一 IPv4/IPv6，`getSockAddr()` 始终返回 `addr6_` 指针（两结构体起始字段布局兼容）
@@ -410,3 +414,135 @@ Socket 只做一件事：**保证 fd 被关闭**。不持有 EventLoop 指针，
 - `Socket` RAII 封装：析构自动 `close(fd_)`，不会因异常导致 fd 泄漏
 - Linux 原子创建非阻塞 socket：`SOCK_NONBLOCK | SOCK_CLOEXEC`，避免 `fcntl` 的竞态窗口
 - `accept4()` 原子接受并设置 NONBLOCK（Linux）；其他平台 `accept()` + `fcntl` 两步
+
+## 九、思考题参考答案
+
+### 1. `getSockAddr()` 返回 `addr6_` 地址在 IPv4 下合法的原因
+
+**源码位置**：`InetAddress.h` 第 169-172 行
+
+```cpp
+const struct sockaddr *getSockAddr() const
+{
+    return static_cast<const struct sockaddr *>((void *)(&addr6_));
+}
+```
+
+这里永远取 `addr6_`（即 `sockaddr_in6`）的地址，即使当前存储的是 IPv4 地址（`addr_`，即 `sockaddr_in`）。这之所以合法，基于以下几点：
+
+**union 的内存布局保证**：
+
+```cpp
+union {
+    struct sockaddr_in  addr_;   // 16 字节
+    struct sockaddr_in6 addr6_;  // 28 字节
+};
+```
+
+C/C++ 标准保证 union 所有成员从**同一个起始地址**开始。因此 `&addr_` == `&addr6_`（指向同一块内存的起始位置）。无论取哪个成员的地址，得到的指针值相同。
+
+**`sockaddr_in` 和 `sockaddr_in6` 的头部字段兼容**：
+
+```
+sockaddr_in  (16字节):  [sin_family(2)] [sin_port(2)] [sin_addr(4)] [padding(8)]
+sockaddr_in6 (28字节):  [sin6_family(2)] [sin6_port(2)] [sin6_flowinfo(4)] [sin6_addr(16)] [sin6_scope_id(4)]
+```
+
+两者的第一个字段都是 `sa_family_t`（2 字节），位于偏移 0 处。内核的 `bind()`、`connect()`、`accept()` 等系统调用接收的参数类型是 `struct sockaddr *`，它们首先读取 `sa_family` 字段来判断是 `AF_INET` 还是 `AF_INET6`，然后按对应结构体解释后续字段。
+
+**具体过程**：
+1. IPv4 场景：`addr_.sin_family = AF_INET`，数据写入 union 的前 16 字节
+2. `getSockAddr()` 返回 `&addr6_`，但由于 union 内存共享，这个指针指向的就是 `addr_` 的数据
+3. 内核收到这个 `sockaddr *`，读取偏移 0 处的 `sin_family == AF_INET`，知道这是 IPv4
+4. 内核按 `sockaddr_in` 解释前 16 字节（`sin_port` 在偏移 2、`sin_addr` 在偏移 4），正确读取 IP 和端口
+5. 虽然传入的 `addrlen` 参数是 `sizeof(sockaddr_in6)` = 28 字节，内核只会读取 `sockaddr_in` 需要的 16 字节
+
+**为什么不直接返回 `addr_` 的地址？**
+
+如果根据 `isIpV6_` 判断返回 `&addr_` 或 `&addr6_`，代码会更复杂（需要条件分支），而且返回类型不同（`sockaddr_in *` vs `sockaddr_in6 *`）。统一返回 `&addr6_`（转为 `sockaddr *`）更简洁，且由于 union 保证了地址相同，行为完全等价。
+
+### 2. `SO_REUSEPORT` 的内核分发机制与副作用
+
+**源码位置**：`Socket.cc` 中 `setReusePort()` 设置 `SO_REUSEPORT` 选项
+
+**内核分发机制**（以 Linux 3.9+ 为例）：
+
+当多个 socket 绑定了相同的 `IP:Port` 并开启 `SO_REUSEPORT` 后，内核使用以下策略将新连接分发到不同 socket：
+
+1. **Linux 3.9-4.5**：使用源地址四元组（源 IP + 源 Port + 目标 IP + 目标 Port）做哈希，对 socket 数量取模，决定交给哪个 socket。这保证同一客户端的连接总是分配到同一个 socket
+2. **Linux 4.6+**：引入了 `SO_ATTACH_REUSEPORT_CBPF/EBPF`，允许用 BPF 程序自定义分发逻辑
+3. **默认哈希**：`hash(src_ip, src_port, dst_ip, dst_port) % num_sockets`
+
+**典型用法**：多线程服务器中，每个 I/O 线程创建自己的 listen socket 并绑定同一端口，每个线程独立 accept，避免了多线程竞争同一个 listen socket 的锁（thundering herd 问题）。
+
+**副作用**：
+
+1. **连接分布不均**：哈希算法不保证完美均匀分布。如果某些源 IP 集中（如 NAT 后面大量客户端共享少数公网 IP），可能导致某些 socket 负载远高于其他
+2. **热升级问题**：当其中一个进程重启时（如灰度发布），该进程的 socket 关闭，所有分配到该 socket 的连接会被 RST。新进程启动后哈希映射改变，已有连接可能被路由到错误的进程
+3. **安全风险**：在 Linux 3.9-4.5 中，任何用户都可以绑定到已被 `SO_REUSEPORT` 打开的端口（只要 UID 相同），可能被恶意进程"偷"连接。Linux 4.6+ 加入了更严格的检查
+4. **每个 socket 独立的 accept 队列**：如果某个线程处理慢，它的 accept 队列可能溢出（SYN flood），而其他线程的队列还是空的，内核不会自动重新分配
+
+### 3. `accept4()` 的 `SOCK_CLOEXEC` 保证了什么
+
+**源码位置**：`Socket.cc` 中 `accept()` 实现
+
+```cpp
+// Linux
+int connFd = ::accept4(sockFd_, addr, &len, SOCK_NONBLOCK | SOCK_CLOEXEC);
+```
+
+**`SOCK_CLOEXEC` 的语义**：在 fd 上设置 `FD_CLOEXEC`（close-on-exec）标志。当进程调用 `exec` 系列函数（如 `execve`）加载新程序时，内核会**自动关闭**所有带 `FD_CLOEXEC` 标志的 fd，新程序不会继承这些 fd。
+
+**不设 `SOCK_CLOEXEC` 时的问题**：
+
+游戏服务器可能通过 `system()`、`popen()` 或 `fork() + exec()` 启动外部脚本（如运维脚本、日志压缩、热更新检测等）：
+
+```cpp
+// 游戏服务器代码
+system("python3 /opt/scripts/send_alert.py");
+// system() 内部：fork() → exec("python3", ...)
+```
+
+`fork()` 会复制父进程的所有 fd 到子进程。如果没有 `FD_CLOEXEC`：
+1. 子进程继承了所有 listen fd 和连接 fd
+2. `exec()` 后新程序（python3）仍然持有这些 fd
+3. 即使父进程关闭了某个连接的 fd，子进程还持有同一个底层 socket 的引用，TCP 连接不会真正关闭（因为内核的 socket 引用计数 > 0）
+4. 如果父进程重启并尝试 `bind()` 同一端口，会得到 `EADDRINUSE`，因为子进程（python 脚本）还占着那个端口
+5. 如果外部脚本长时间运行（甚至卡住），大量 fd 被泄漏，可能耗尽 fd 配额（EMFILE）
+
+**`accept4()` 的原子性优势**：
+
+传统的 `accept()` + `fcntl(FD_CLOEXEC)` 两步操作之间存在**竞态窗口**：如果另一个线程恰好在这两步之间调用了 `fork()`，子进程就会继承未设置 `CLOEXEC` 的 fd。`accept4()` 在内核态一步完成，消除了这个竞态。
+
+### 4. `isIntranetIp()` 对 `10.0.0.0` 边界地址的处理，以及 `fe80::` 的局限性
+
+**源码位置**：`InetAddress.cc` 第 133-173 行
+
+```cpp
+uint32_t ip_addr = ntohl(addr_.sin_addr.s_addr);
+if ((ip_addr >= 0x0A000000 && ip_addr <= 0x0AFFFFFF) || ...)
+```
+
+**`10.0.0.0` 的处理**：
+
+- `10.0.0.0` 转为主机字节序的 32 位整数：`0x0A000000`
+- 检测条件：`ip_addr >= 0x0A000000 && ip_addr <= 0x0AFFFFFF`
+- `0x0A000000 >= 0x0A000000` → true
+- 结论：**能正确识别为内网地址**
+
+`10.0.0.0` 是 `10.0.0.0/8` 网段的网络地址（全零主机位），虽然它通常不会作为主机地址使用（按惯例网络地址不分配给主机），但从 RFC 1918 的定义看，它确实属于私有地址范围，所以判定为内网地址是正确的。
+
+**但有一个遗漏**：源码中 loopback 检测只判断了 `0x7f000001`（即 `127.0.0.1`），而没有覆盖整个 `127.0.0.0/8` 网段。实际上 `127.0.0.2`、`127.255.255.254` 等都是 loopback 地址，但 `isIntranetIp()` 不会将它们识别为内网地址。不过在实际使用中，几乎只会遇到 `127.0.0.1`，所以这个遗漏影响极小。
+
+**`fe80::` 链路本地地址不适合跨路由器连接的原因**：
+
+IPv6 的链路本地地址（`fe80::/10`）有以下特殊限制：
+
+1. **作用域限于单条链路**：`fe80::` 地址只在同一个二层网络（同一交换机/VLAN）内有效。路由器**不会转发**目标地址为 `fe80::` 的数据包，这是 IPv6 协议栈的硬性规定
+2. **需要 scope_id**：由于 `fe80::` 地址在不同网卡上可能重复（每个网卡都有一个 `fe80::` 地址），使用时必须指定 `scope_id`（即网卡索引），如 `fe80::1%eth0`。跨机器时 scope_id 没有统一标准
+3. **不可路由**：游戏服务器集群通常跨多个网段部署（如网关服在 DMZ，游戏服在内网，数据库在独立网段），这些网段之间通过路由器连接。`fe80::` 地址无法穿越路由器，因此不能用于服务器间通信
+4. **正确做法**：跨路由器的内网 IPv6 通信应使用 ULA（Unique Local Address，`fc00::/7`）或全局单播地址（GUA），而不是链路本地地址
+
+---
+
+*学习日期：2026-04-15 | 上一课：[第08课_定时器系统](第08课_定时器系统.md) | 下一课：[第10课_Acceptor与Connector](第10课_Acceptor与Connector.md)*
