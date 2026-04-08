@@ -567,4 +567,4 @@ Channel 才会随着 unique_ptr 析构而被 delete。
 
 ---
 
-*学习日期：2026-03-12 | 上一课：[第05课_EventLoop事件循环](第05课_EventLoop事件循环.md) | 下一课：[第07课_Poller多路复用](第07课_Poller多路复用.md)*
+*学习日期：2026-03-12 | 上一课：[第05课_EventLoop事件循环]({{< relref "第05课_EventLoop事件循环.md" >}}) | 下一课：[第07课_Poller多路复用]({{< relref "第07课_Poller多路复用.md" >}})*

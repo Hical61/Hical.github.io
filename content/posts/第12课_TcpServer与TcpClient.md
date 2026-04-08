@@ -787,4 +787,4 @@ void gracefulStop(TcpServer &server, EventLoop *loop) {
 
 ---
 
-*学习日期：2026-03-25 | 上一课：[第11课_TcpConnection连接生命周期](第11课_TcpConnection连接生命周期.md) | 下一课：[第13课_多线程EventLoop](第13课_多线程EventLoop.md)*
+*学习日期：2026-03-25 | 上一课：[第11课_TcpConnection连接生命周期]({{< relref "第11课_TcpConnection连接生命周期.md" >}}) | 下一课：[第13课_多线程EventLoop]({{< relref "第13课_多线程EventLoop.md" >}})*

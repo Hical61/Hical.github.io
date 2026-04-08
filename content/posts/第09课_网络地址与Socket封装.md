@@ -545,4 +545,4 @@ IPv6 的链路本地地址（`fe80::/10`）有以下特殊限制：
 
 ---
 
-*学习日期：2026-03-20 | 上一课：[第08课_定时器系统](第08课_定时器系统.md) | 下一课：[第10课_Acceptor与Connector](第10课_Acceptor与Connector.md)*
+*学习日期：2026-03-20 | 上一课：[第08课_定时器系统]({{< relref "第08课_定时器系统.md" >}}) | 下一课：[第10课_Acceptor与Connector]({{< relref "第10课_Acceptor与Connector.md" >}})*
