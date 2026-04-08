@@ -1,5 +1,5 @@
 +++
-date = '2026-04-18'
+date = '2026-03-21'
 draft = false
 title = 'Acceptor & Connector — 连接的两端'
 categories = ["网络编程"]
@@ -732,5 +732,5 @@ retryInterval_ = std::max(kInitRetryDelayMs, retryInterval_ / 2);
 
 ---
 
-*学习日期：2026-04-18 | 上一课：[第09课_网络地址与Socket封装](第09课_网络地址与Socket封装.md) | 下一课：[第11课_TcpConnection连接生命周期](第11课_TcpConnection连接生命周期.md)*
+*学习日期：2026-03-21 | 上一课：[第09课_网络地址与Socket封装](第09课_网络地址与Socket封装.md) | 下一课：[第11课_TcpConnection连接生命周期](第11课_TcpConnection连接生命周期.md)*
 

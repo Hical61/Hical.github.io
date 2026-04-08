@@ -1,5 +1,5 @@
 +++
-date = '2026-04-06'
+date = '2026-03-10'
 draft = false
 title = 'EventLoop — 事件循环'
 categories = ["网络编程"]
@@ -676,4 +676,4 @@ while (looping_.load(std::memory_order_acquire))
 
 ---
 
-*学习日期：2026-04-06 | 上一课：[第04课_回调类型定义](第04课_回调类型定义.md) | 下一课：[第06课_Channel事件通道](第06课_Channel事件通道.md)*
+*学习日期：2026-03-10 | 上一课：[第04课_回调类型定义](第04课_回调类型定义.md) | 下一课：[第06课_Channel事件通道](第06课_Channel事件通道.md)*

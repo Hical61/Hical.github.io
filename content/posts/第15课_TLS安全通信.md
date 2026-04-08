@@ -1,5 +1,5 @@
 +++
-date = '2026-05-01'
+date = '2026-04-01'
 draft = false
 title = 'TLS 安全通信'
 categories = ["网络编程"]
@@ -697,4 +697,4 @@ TLSProvider(TcpConnection* conn, TLSPolicyPtr policy, SSLContextPtr ctx)
 
 ---
 
-*学习日期：2026-05-01 | 上一课：[第14课_任务队列](第14课_任务队列.md) | 下一课：[第16课_DNS解析](第16课_DNS解析.md)*
+*学习日期：2026-04-01 | 上一课：[第14课_任务队列](第14课_任务队列.md) | 下一课：[第16课_DNS解析](第16课_DNS解析.md)*

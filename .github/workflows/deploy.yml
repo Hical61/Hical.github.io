@@ -35,7 +35,7 @@ jobs:
           extended: true      # 关键：必须用 extended 版本编译主题
 
       - name: 编译生成网页 (Build)
-        run: hugo --minify    # 开启代码压缩，访问速度更快
+        run: hugo --minify --buildFuture    # 开启代码压缩，构建未来日期文章
 
       - name: 上传打包文件 (Upload artifact)
         uses: actions/upload-pages-artifact@v3

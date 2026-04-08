@@ -1,5 +1,5 @@
 +++
-date = '2026-04-20'
+date = '2026-03-22'
 draft = false
 title = 'TcpConnection — 连接生命周期'
 categories = ["网络编程"]
@@ -654,4 +654,4 @@ void TcpConnectionImpl::forceClose()
 
 ---
 
-*学习日期：2026-04-20 | 上一课：[第10课_Acceptor与Connector](第10课_Acceptor与Connector.md) | 下一课：[第12课_TcpServer与TcpClient](第12课_TcpServer与TcpClient.md)*
+*学习日期：2026-03-22 | 上一课：[第10课_Acceptor与Connector](第10课_Acceptor与Connector.md) | 下一课：[第12课_TcpServer与TcpClient](第12课_TcpServer与TcpClient.md)*
