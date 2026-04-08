@@ -676,6 +676,224 @@ auto* old = std::pmr::set_default_resource(&myPool);
 
 ---
 
+## 十二、思考题参考答案
+
+### 题 1：monotonic_buffer_resource 下删除 map key，内存会回收吗？
+
+**答：不会。**
+
+`monotonic_buffer_resource` 的 `do_deallocate()` 是**空操作**——它什么都不做。内存只在资源析构或调用 `release()` 时才统一归还。
+
+**具体发生了什么：**
+
+```cpp
+std::pmr::monotonic_buffer_resource pool{65536};
+std::pmr::map<std::pmr::string, int> m{&pool};
+
+m["LongPlayerName_12345"] = 100;
+// 此时 pool 内部分配了：
+//   1. map 的红黑树节点（含 key-value pair）
+//   2. string "LongPlayerName_12345" 的字符数据（如果超过 SSO 阈值）
+
+m.erase("LongPlayerName_12345");
+// map 调用了 deallocate()，但 monotonic 的 deallocate 是空操作
+// 红黑树节点的内存 → 不回收，仍占着 pool 的空间
+// string 字符数据的内存 → 不回收，仍占着 pool 的空间
+```
+
+**对长时间运行的游戏服务器的影响：**
+
+如果在 monotonic 资源上做**频繁的增删操作**（比如玩家不断获得和丢弃道具），内存只增不减，最终会：
+1. 初始 buffer 用完，不断从 upstream 申请更大的新 buffer（几何级增长）
+2. 服务器内存持续上涨，表现为**内存泄漏**
+
+**正确做法：**
+- monotonic 只用于**生命周期明确、批量创建后统一销毁**的场景（如单次请求处理、单帧计算）
+- 需要频繁增删的长生命周期数据（如玩家背包），应使用 `pool_resource` 或默认 `new/delete`
+
+```cpp
+// 正确：请求级 monotonic，请求结束统一释放
+void HandleRequest() {
+    char buf[4096];
+    std::pmr::monotonic_buffer_resource arena{buf, sizeof(buf)};
+    std::pmr::map<std::pmr::string, int> temp{&arena};
+    // ... 处理逻辑，随便增删
+}  // arena 析构，全部归还，干净利落
+
+// 错误：长生命周期数据用 monotonic
+class PlayerManager {
+    std::pmr::monotonic_buffer_resource pool_{1024 * 1024};  // 永远不释放
+    std::pmr::map<int, PlayerData> players_{&pool_};         // 玩家上下线 = 持续增删 = 内存泄漏
+};
+```
+
+---
+
+### 题 2：EventLoop 线程内的临时对象，选哪个 pool_resource？
+
+**答：线程内部选 `unsynchronized_pool_resource`，跨线程传递需要额外设计。**
+
+**分析：**
+
+游戏服务器典型的线程模型是 one-loop-per-thread——每个 EventLoop 线程独立运行，线程内部的数据不需要锁保护。
+
+```
+Thread-1 (EventLoop-1)          Thread-2 (EventLoop-2)
+┌─────────────────────┐        ┌─────────────────────┐
+│ unsynchronized_pool  │        │ unsynchronized_pool  │
+│ (无锁，性能最优)      │        │ (无锁，性能最优)      │
+│                     │        │                     │
+│ 消息解析 → 逻辑处理  │        │ 消息解析 → 逻辑处理  │
+│ 全部在本线程完成     │        │ 全部在本线程完成     │
+└─────────────────────┘        └─────────────────────┘
+```
+
+每个线程有自己的 `unsynchronized_pool_resource`，无锁竞争，性能最优。
+
+**如果临时对象需要跨线程传递呢？**
+
+这是一个容易踩坑的问题。`unsynchronized_pool_resource` 不是线程安全的，如果对象在 Thread-1 上分配、在 Thread-2 上释放，会产生**数据竞争（UB）**。
+
+三种解决方案：
+
+**方案 A：数据拷贝到目标线程的资源上（推荐）**
+
+```cpp
+// Thread-1: 构建消息
+void OnThread1() {
+    std::pmr::unsynchronized_pool_resource localPool;
+    std::pmr::vector<int> data{&localPool};
+    data = {1, 2, 3, 4, 5};
+
+    // 跨线程投递时，拷贝到目标线程
+    eventLoop2->runInLoop([d = std::vector<int>(data.begin(), data.end())] {
+        // Thread-2 中，d 使用默认 allocator，与 Thread-1 的 pool 无关
+        ProcessData(d);
+    });
+}
+```
+
+**方案 B：使用 `synchronized_pool_resource` 作为共享资源**
+
+```cpp
+// 全局或长生命周期的线程安全池，专门用于跨线程数据
+std::pmr::synchronized_pool_resource sharedPool;
+
+// Thread-1 上分配
+auto* msg = sharedPool.allocate(sizeof(Message), alignof(Message));
+
+// Thread-2 上释放 —— 安全，因为 synchronized 有锁保护
+sharedPool.deallocate(msg, sizeof(Message), alignof(Message));
+```
+
+**方案 C：对象所有权转移，释放回原线程**
+
+```cpp
+// Thread-2 用完后，把释放操作投递回 Thread-1
+eventLoop1->runInLoop([p, &pool1] {
+    pool1.deallocate(p, size, align);  // 在 pool1 所属线程释放，安全
+});
+```
+
+**结论：** 线程内部果断用 `unsynchronized`，跨线程场景优先用方案 A（数据拷贝，最简单安全），性能敏感时考虑方案 B 或 C。
+
+---
+
+### 题 3：三个游戏场景的 PMR 选型
+
+#### (a) 每帧创建大量临时 AI 路径计算结果
+
+**选择：`monotonic_buffer_resource`（预分配栈 buffer）**
+
+```cpp
+void AITick() {
+    // 路径计算结果是纯临时数据：帧开始创建，帧结束丢弃
+    char buf[32768];  // 32KB 栈上缓冲区，覆盖大多数帧的需求
+    std::pmr::monotonic_buffer_resource arena{buf, sizeof(buf)};
+
+    for (auto& npc : activeNpcs) {
+        std::pmr::vector<Vec3> path{&arena};
+        FindPath(npc.pos, npc.target, path);
+        npc.SetPath(path);  // 拷贝到 npc 自己的存储
+    }
+    // 帧结束，arena 析构，零 free 调用
+}
+```
+
+**理由：**
+- 数据生命周期 = 一帧，天然适合 monotonic 的"只分配不释放"模式
+- 路径计算密集，每帧可能有成百上千次分配，monotonic 的指针递增分配速度碾压任何池式方案
+- 栈上 buffer 避免了连 upstream 都不需要访问的最优路径
+
+#### (b) 管理数万个在线玩家的背包数据
+
+**选择：`unsynchronized_pool_resource`（或默认 `new/delete`）**
+
+```cpp
+class PlayerBag {
+    // 背包物品频繁增删：获得装备、使用药水、丢弃物品、整理排序...
+    // 需要 deallocate 真正归还内存
+
+    static thread_local std::pmr::unsynchronized_pool_resource bagPool;
+
+    std::pmr::vector<Item> items_{&bagPool};
+    std::pmr::map<int, int> itemCountCache_{&bagPool};
+};
+```
+
+**理由：**
+- 背包是**长生命周期 + 频繁增删**的数据结构，用 monotonic 会内存泄漏（题 1 的教训）
+- 数万玩家的背包操作集中在各自的 EventLoop 线程，用 `unsynchronized` 避免锁开销
+- 背包物品大小相对固定（Item 结构体），pool 的分级机制能有效复用
+- 如果背包操作不是性能瓶颈，直接用默认 `new/delete` 也完全可以——**不要过早优化**
+
+#### (c) 处理突发的大型公会战日志记录
+
+**选择：`monotonic_buffer_resource`（大预分配 + upstream pool）**
+
+```cpp
+class GuildBattleLogger {
+    // 公会战期间日志量暴涨：伤害记录、技能释放、buff变化、击杀事件...
+    // 特点：写入密集、基本不删除、战斗结束后批量持久化再清空
+
+    std::pmr::synchronized_pool_resource upstream_;  // 兜底
+    std::pmr::monotonic_buffer_resource arena_{
+        1024 * 1024,  // 1MB 初始，公会战日志量大
+        &upstream_
+    };
+
+    std::pmr::vector<BattleLogEntry> logs_{&arena_};
+
+public:
+    void RecordEvent(const BattleLogEntry& entry) {
+        logs_.push_back(entry);  // 极快的 monotonic 分配
+    }
+
+    void FlushAndReset() {
+        PersistToDatabase(logs_);  // 写入 DB
+        logs_.clear();
+        arena_.release();  // 一次性释放所有内存，重新开始
+    }
+};
+```
+
+**理由：**
+- 日志是典型的**追加写入（append-only）** 场景，几乎不删除单条记录
+- 公会战是突发事件，短时间内产生海量日志，monotonic 的分配速度能应对峰值
+- 战斗结束后调用 `release()` 一次性归还所有内存，然后进入下一场
+- `synchronized_pool_resource` 作为 upstream，因为公会战日志可能被多个线程写入（多个参战玩家的消息分散在不同 EventLoop）
+- 1MB 初始预分配避免频繁向 upstream 申请，但即使不够也能优雅扩展
+
+**三个场景的选型对比：**
+
+| 场景        | 生命周期 | 增删模式 | 选型                   | 关键考量                   |
+| ----------- | -------- | -------- | ---------------------- | -------------------------- |
+| AI 路径计算 | 一帧     | 只创建   | monotonic（栈 buffer） | 极致速度，零释放开销       |
+| 玩家背包    | 长期     | 频繁增删 | unsynchronized_pool    | 需要真正的 deallocate      |
+| 公会战日志  | 一场战斗 | 追加写入 | monotonic（大预分配）  | append-only + 批量 release |
+
+---
+
 ## 参考资料
 
 - [cppreference: memory_resource](https://en.cppreference.com/w/cpp/memory/memory_resource)
