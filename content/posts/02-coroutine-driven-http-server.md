@@ -227,7 +227,7 @@ void registerOneRoute(Router& router, std::shared_ptr<Handler> pHandler,
 - `try/catch` 统一错误处理 → 不会遗漏
 - 洋葱模型中间件自然表达 → 更好的架构
 
-代价是要求 C++20，但在 2025 年，这已经不是障碍。
+代价是要求 C++20，但在 2026 年，这已经不是障碍。
 
 ---
 

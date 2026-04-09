@@ -1,0 +1,90 @@
+/*
+ * Markdown 语法高亮风格 — 让渲染后的文章也有编辑器般的彩色效果
+ * 仅作用于 .post-content 内，不影响其他区域
+ */
+
+/* ===== 标题：不同层级不同颜色 ===== */
+.post-content h1 {
+    color: #e06c75;
+}
+
+.post-content h2 {
+    color: #e06c75;
+}
+
+.post-content h3 {
+    color: #e5c07b;
+}
+
+.post-content h4 {
+    color: #98c379;
+}
+
+.post-content h5,
+.post-content h6 {
+    color: #56b6c2;
+}
+
+/* ===== 加粗：黄色 ===== */
+.post-content strong {
+    color: #d19a66;
+}
+
+/* ===== 斜体：绿色 ===== */
+.post-content em {
+    color: #98c379;
+}
+
+/* ===== 行内代码：黑色底 + 绿色字 ===== */
+.post-content code:not(pre code) {
+    color: #98c379;
+    background: #1e1e1e;
+    border: 1px solid rgba(152, 195, 121, 0.2);
+    font-size: 0.85em;
+}
+
+/* ===== 链接：紫色 ===== */
+.post-content a {
+    color: #c678dd;
+}
+
+.post-content a:hover {
+    color: #e06c75;
+}
+
+/* ===== 引用块：左边框 + 斜体色 ===== */
+.post-content blockquote {
+    border-inline-start: 3px solid #e5c07b;
+    background: rgba(229, 192, 123, 0.05);
+    padding: 10px 14px;
+}
+
+.post-content blockquote p {
+    color: #abb2bf;
+}
+
+/* ===== 表格表头 ===== */
+.post-content table th {
+    color: #e5c07b;
+    border-bottom: 2px solid #e5c07b;
+}
+
+/* ===== 删除线 ===== */
+.post-content del {
+    color: var(--secondary);
+    opacity: 0.6;
+}
+
+/* ===== 水平分割线 ===== */
+.post-content hr {
+    background: linear-gradient(90deg, transparent, #528bff, transparent);
+}
+
+/* ===== 列表标记颜色（通过伪元素） ===== */
+.post-content ul>li::marker {
+    color: #56b6c2;
+}
+
+.post-content ol>li::marker {
+    color: #d19a66;
+}
