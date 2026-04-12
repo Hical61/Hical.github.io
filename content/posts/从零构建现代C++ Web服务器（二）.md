@@ -874,3 +874,9 @@ Awaitable<void> HttpServer::handleSession(tcp::socket socket)
 ---
 
 > **hical** — 基于 C++26 的现代高性能 Web 框架 | [GitHub](https://github.com/user/hical)
+
+---
+
+> **上一篇**：[从零构建现代C++ Web服务器（一）：设计理念与架构总览]({{< relref "从零构建现代C++ Web服务器（一）" >}})
+>
+> **下一篇**：[从零构建现代C++ Web服务器（三）：路由、中间件与 SSL]({{< relref "从零构建现代C++ Web服务器（三）" >}})

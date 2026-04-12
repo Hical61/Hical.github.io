@@ -583,3 +583,7 @@ Boost.Asio io_context × N
 ---
 
 > **hical** — 基于 C++26 的现代高性能 Web 框架 | [GitHub](https://github.com/user/hical)
+
+---
+
+> **下一篇**：[从零构建现代C++ Web服务器（二）：协程异步与 PMR 内存池]({{< relref "从零构建现代C++ Web服务器（二）" >}})
