@@ -1,6 +1,6 @@
 +++
 title = '为 C++ Web 框架设计三层 PMR 内存池：从原理到实战'
-date = '2026-05-01'
+date = '2026-04-12'
 draft = false
 tags = ["C++17", "PMR", "内存管理", "高性能", "Hical"]
 categories = ["Hical框架"]

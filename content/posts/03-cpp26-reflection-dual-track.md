@@ -1,6 +1,6 @@
 +++
 title = 'C++26 反射落地实战：双路线条件编译实现自动路由注册与 JSON 序列化'
-date = '2026-05-03'
+date = '2026-04-12'
 draft = false
 tags = ["C++26", "反射", "元编程", "路由注册", "Hical"]
 categories = ["Hical框架"]

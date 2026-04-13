@@ -1,6 +1,6 @@
 +++
 title = '告别回调地狱：在 C++ Web 框架中全面拥抱协程'
-date = '2026-05-02'
+date = '2026-04-12'
 draft = false
 tags = ["C++20", "协程", "Boost.Asio", "异步编程", "Hical"]
 categories = ["Hical框架"]
