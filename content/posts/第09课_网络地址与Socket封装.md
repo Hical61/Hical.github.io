@@ -407,14 +407,6 @@ Socket 只做一件事：**保证 fd 被关闭**。不持有 EventLoop 指针，
 
 ---
 
-## 核心收获
-
-- `InetAddress` 用 `union { sockaddr_in, sockaddr_in6 }` 统一 IPv4/IPv6，`getSockAddr()` 始终返回 `addr6_` 指针（两结构体起始字段布局兼容）
-- `isIntranetIp()` 用位移运算检测 RFC1918 私有地址段，比字符串解析快
-- `Socket` RAII 封装：析构自动 `close(fd_)`，不会因异常导致 fd 泄漏
-- Linux 原子创建非阻塞 socket：`SOCK_NONBLOCK | SOCK_CLOEXEC`，避免 `fcntl` 的竞态窗口
-- `accept4()` 原子接受并设置 NONBLOCK（Linux）；其他平台 `accept()` + `fcntl` 两步
-
 ## 九、思考题参考答案
 
 ### 1. `getSockAddr()` 返回 `addr6_` 地址在 IPv4 下合法的原因

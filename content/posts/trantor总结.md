@@ -1,16 +1,16 @@
 +++
-date = '2026-05-15'
+date = '2026-04-05'
 draft = false
 title = 'trantor 网络库学习总结'
 categories = ["网络编程"]
 tags = ["C++", "网络库", "trantor", "IOCP", "异步IO", "学习笔记"]
-description = "近两个月深入学习 trantor 网络库的总结，涵盖核心架构、事件循环、异步 IO 等关键设计。"
+description = "近一个月深入学习 trantor 网络库的总结，涵盖核心架构、事件循环、异步 IO 等关键设计。"
 +++
 
 
 # trantor 网络库学习总结
 
-> 学习周期：近2个月
+> 学习周期：近一个月
 > 覆盖范围：trantor 全部核心模块，共 18 课
 
 ---
@@ -358,4 +358,4 @@ for (auto &logFile : pendingLogs) {
 
 ---
 
-*最后更新：2026-05-15*
+*最后更新：2026-04-05*

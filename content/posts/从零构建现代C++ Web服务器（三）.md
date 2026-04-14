@@ -920,7 +920,7 @@ void HttpServer::start()
 
 ---
 
-> **hical** — 基于 C++26 的现代高性能 Web 框架 | [GitHub](https://github.com/user/hical)
+> **hical** — 基于 C++26 的现代高性能 Web 框架 | [GitHub](https://github.com/Hical61/Hical.git)
 
 ---
 

@@ -1381,7 +1381,7 @@ Session 中间件 → 验证登录态
 
 hical 的核心理念始终如一：**用现代 C++ 特性（协程、Concepts、PMR、反射）消除传统 C++ 网络编程的痛点，让 C++ Web 开发既高性能又不失优雅**。
 
-如果这个系列对你有帮助，欢迎在 [GitHub](https://github.com/user/hical) 上给个 Star，或者提一个 Issue 告诉我们你的想法。
+如果这个系列对你有帮助，欢迎在 [GitHub](https://github.com/Hical61/Hical.git) 上给个 Star，或者提一个 Issue 告诉我们你的想法。
 
 > 全系列完结。感谢阅读。
 
