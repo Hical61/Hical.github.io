@@ -620,4 +620,4 @@ C++26 反射层（第9课）
 
 ---
 
-*下一课：[第9课 - Cookie、Session 与文件服务]({{< relref "lesson-09-notes" >}})，将学习 Cookie 解析/设置、Session 会话管理、静态文件安全托管、Multipart 文件上传。*
+*下一课：[第9课 - Cookie、Session 与文件服务]({{< relref "Hical-09-notes" >}})，将学习 Cookie 解析/设置、Session 会话管理、静态文件安全托管、Multipart 文件上传。*

@@ -884,4 +884,4 @@ C++26 反射层（第10课） ← 你在这里
 
 ---
 
-*上一课：[第9课 - Cookie、Session 与文件服务]({{< relref "lesson-09-notes" >}}) | 下一步：[项目A - 性能压测与分析]({{< relref "project-a-notes" >}})*
+*上一课：[第9课 - Cookie、Session 与文件服务]({{< relref "Hical-09-notes" >}}) | 下一步：[项目A - 性能压测与分析]({{< relref "Hical-project-a" >}})*

@@ -991,4 +991,4 @@ C++26 反射层（第10课）
 
 ---
 
-*上一课：[第8课 - HttpServer 整合]({{< relref "lesson-08-notes" >}}) | 下一课：[第10课 - C++26 反射与自动化]({{< relref "lesson-10-notes" >}})*
+*上一课：[第8课 - HttpServer 整合]({{< relref "Hical-08-notes" >}}) | 下一课：[第10课 - C++26 反射与自动化]({{< relref "Hical-10-notes" >}})*
