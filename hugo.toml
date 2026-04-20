@@ -66,6 +66,10 @@ paginate = 8
   url = "/tags/"
   weight = 27
 [[menu.main]]
+  name = "🔒 密室"
+  url = "/private/"
+  weight = 28
+[[menu.main]]
   name = "🔍 探幽"
   url = "/search/"
   weight = 30

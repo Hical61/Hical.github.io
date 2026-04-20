@@ -37,6 +37,23 @@ jobs:
       - name: 编译生成网页 (Build)
         run: hugo --minify    # 加上--buildFuture，则开启代码压缩，构建未来日期文章
 
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 加密私密文章 (Encrypt private pages)
+        env:
+          STATICRYPT_PASSWORD: ${{ secrets.PRIVATE_PAGE_PASSWORD }}
+        run: |
+          npm install -g staticrypt
+          if [ -d "public/private" ]; then
+            find public/private -name "*.html" -exec staticrypt {} "$STATICRYPT_PASSWORD" --short -o {} \;
+            echo "✅ 加密完成"
+          else
+            echo "⚠️ 没有找到 private 目录，跳过加密"
+          fi
+
       - name: 上传打包文件 (Upload artifact)
         uses: actions/upload-pages-artifact@v3
         with:

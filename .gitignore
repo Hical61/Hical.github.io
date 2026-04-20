@@ -10,5 +10,12 @@ Thumbs.db
 
 # 编辑器临时文件
 .vscode/
+.idea/
 *.swp
 *.swo
+
+# Claude Code
+.claude/
+*.swp
+*.swo
+*~
