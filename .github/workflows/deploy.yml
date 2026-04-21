@@ -48,17 +48,19 @@ jobs:
         run: |
           npm install -g staticrypt
           if [ -d "public/private" ]; then
-            # 使用固定 salt + 自定义模板，确保输入一次密码全站私密文章免密
+            # 使用固定 salt + 自定义模板，输入一次密码全站私密文章免密
             staticrypt public/private -r -p "$STATICRYPT_PASSWORD" --short \
-              --remember 30 \
+              --remember 1 \
               --salt "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6" \
               -t staticrypt-template.html \
               --template-title "🔒 密室" \
               --template-instructions "请输入密码以访问私密文章" \
               --template-placeholder "输入密码" \
               --template-button "解锁" \
-              --template-error "密码错误，请重试" \
-              -d public/private
+              --template-error "密码错误，请重试"
+            # staticrypt -r 不支持 -d 原地覆盖，需手动拷回
+            cp -rf encrypted/private/* public/private/
+            rm -rf encrypted
             echo "✅ 加密完成"
           else
             echo "⚠️ 没有找到 private 目录，跳过加密"

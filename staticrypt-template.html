@@ -275,7 +275,7 @@
                 }
             });
 
-            // handle password form submission - 强制 remember = true
+            // handle password form submission - 强制 remember = true，过期 1 小时
             document.getElementById("staticrypt-form").addEventListener("submit", async function (e) {
                 e.preventDefault();
 
@@ -284,7 +284,11 @@
                 // 始终传 true，确保密码被记住，用户无需手动勾选
                 const { isSuccessful } = await staticrypt.handleDecryptionOfPage(password, true);
 
-                if (!isSuccessful) {
+                if (isSuccessful) {
+                    // 覆盖过期时间为 1 小时（staticrypt 默认按天算，这里手动设置精确的过期时间戳）
+                    const oneHourFromNow = new Date().getTime() + 1000 * 60 * 60;
+                    localStorage.setItem(templateConfig.rememberExpirationKey, oneHourFromNow);
+                } else {
                     alert(templateError);
                 }
             });
