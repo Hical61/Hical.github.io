@@ -48,7 +48,7 @@ jobs:
         run: |
           npm install -g staticrypt
           if [ -d "public/private" ]; then
-            find public/private -name "*.html" -exec staticrypt {} -p "$STATICRYPT_PASSWORD" -o {} \;
+            find public/private -name "*.html" -exec staticrypt {} -p "$STATICRYPT_PASSWORD" --short -o {} \;
             echo "✅ 加密完成"
           else
             echo "⚠️ 没有找到 private 目录，跳过加密"
