@@ -50,10 +50,18 @@ jobs:
           if [ -d "public/private" ]; then
             find public/private -name "*.html" | while read f; do
               dir=$(dirname "$f")
-              staticrypt "$f" -p "$STATICRYPT_PASSWORD" --short -o "$dir"
-              echo "  加密: $f"
+              staticrypt "$f" -p "$STATICRYPT_PASSWORD" --short -d "$dir"
+              # staticrypt 输出到 $dir/encrypted/原文件名，移回覆盖原文件
+              encrypted_file="$dir/encrypted/$(basename "$f")"
+              if [ -f "$encrypted_file" ]; then
+                mv "$encrypted_file" "$f"
+                rmdir "$dir/encrypted" 2>/dev/null || true
+                echo "  ✅ 加密: $f"
+              else
+                echo "  ❌ 加密失败: $f"
+              fi
             done
-            echo "✅ 加密完成"
+            echo "✅ 全部加密完成"
           else
             echo "⚠️ 没有找到 private 目录，跳过加密"
           fi
