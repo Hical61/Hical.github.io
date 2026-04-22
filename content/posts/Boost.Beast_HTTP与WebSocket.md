@@ -789,6 +789,510 @@ catch (const beast::system_error& e)
 
 ---
 
+## 参考答案
+
+### 练习 1 参考答案：基础 HTTP 服务端
+
+```cpp
+#include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/beast.hpp>
+#include <iostream>
+
+namespace beast = boost::beast;
+namespace http = beast::http;
+using boost::asio::ip::tcp;
+using boost::asio::awaitable;
+using boost::asio::use_awaitable;
+
+awaitable<void> handleSession(tcp::socket socket)
+{
+    try
+    {
+        beast::flat_buffer buffer;
+        http::request<http::string_body> req;
+        co_await http::async_read(socket, buffer, req, use_awaitable);
+
+        http::response<http::string_body> res;
+        res.version(11);
+
+        if (req.method() == http::verb::get && req.target() == "/")
+        {
+            res.result(http::status::ok);
+            res.set(http::field::content_type, "text/html");
+            res.body() = "<h1>Hello from Beast!</h1><p>This is the homepage.</p>";
+        }
+        else if (req.method() == http::verb::post && req.target() == "/echo")
+        {
+            res.result(http::status::ok);
+            res.set(http::field::content_type, "text/plain");
+            res.body() = req.body();  // 原样返回
+        }
+        else
+        {
+            res.result(http::status::not_found);
+            res.set(http::field::content_type, "text/plain");
+            res.body() = "404 Not Found";
+        }
+
+        res.prepare_payload();
+        co_await http::async_write(socket, res, use_awaitable);
+
+        boost::system::error_code ec;
+        socket.shutdown(tcp::socket::shutdown_send, ec);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "会话错误: " << e.what() << std::endl;
+    }
+}
+
+awaitable<void> listener(tcp::acceptor acceptor)
+{
+    for (;;)
+    {
+        auto socket = co_await acceptor.async_accept(use_awaitable);
+        boost::asio::co_spawn(
+            acceptor.get_executor(),
+            handleSession(std::move(socket)),
+            boost::asio::detached);
+    }
+}
+
+int main()
+{
+    boost::asio::io_context ioCtx;
+    tcp::acceptor acceptor(ioCtx, tcp::endpoint(tcp::v4(), 8080));
+    std::cout << "HTTP server on :8080" << std::endl;
+    boost::asio::co_spawn(ioCtx, listener(std::move(acceptor)), boost::asio::detached);
+    ioCtx.run();
+}
+// 测试:
+//   curl http://localhost:8080/                          → HTML 页面
+//   curl -X POST -d "hello" http://localhost:8080/echo   → "hello"
+//   curl http://localhost:8080/nonexistent                → 404
+```
+
+**要点**：`prepare_payload()` 是必须调用的——它根据 body 长度自动设置 `Content-Length` 头。漏掉它，客户端可能无法正确识别响应结束。
+
+### 练习 2 参考答案：body_limit 保护
+
+```cpp
+#include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/beast.hpp>
+#include <iostream>
+
+namespace beast = boost::beast;
+namespace http = beast::http;
+using boost::asio::ip::tcp;
+using boost::asio::awaitable;
+using boost::asio::use_awaitable;
+
+awaitable<void> handleSession(tcp::socket socket)
+{
+    beast::flat_buffer buffer;
+
+    try
+    {
+        // 使用 request_parser 替代 request，以便设置 body_limit
+        http::request_parser<http::string_body> parser;
+        parser.body_limit(1024);  // 最大 1KB
+
+        co_await http::async_read(socket, buffer, parser, use_awaitable);
+        auto req = parser.release();
+
+        http::response<http::string_body> res {http::status::ok, 11};
+        if (req.method() == http::verb::post && req.target() == "/echo")
+        {
+            res.set(http::field::content_type, "text/plain");
+            res.body() = req.body();
+        }
+        else
+        {
+            res.result(http::status::not_found);
+            res.body() = "Not Found";
+        }
+        res.prepare_payload();
+        co_await http::async_write(socket, res, use_awaitable);
+    }
+    catch (const beast::system_error& e)
+    {
+        if (e.code() == http::error::body_limit)
+        {
+            // 请求体超过 1KB → 返回 413
+            http::response<http::string_body> res {
+                http::status::payload_too_large, 11};
+            res.body() = "Request body exceeds 1KB limit";
+            res.prepare_payload();
+            boost::system::error_code writeEc;
+            http::write(socket, res, writeEc);  // 同步写（异常路径中不宜再 co_await）
+        }
+    }
+
+    boost::system::error_code ec;
+    socket.shutdown(tcp::socket::shutdown_send, ec);
+}
+
+awaitable<void> listener(tcp::acceptor acceptor)
+{
+    for (;;)
+    {
+        auto socket = co_await acceptor.async_accept(use_awaitable);
+        boost::asio::co_spawn(acceptor.get_executor(),
+            handleSession(std::move(socket)), boost::asio::detached);
+    }
+}
+
+int main()
+{
+    boost::asio::io_context ioCtx;
+    tcp::acceptor acceptor(ioCtx, tcp::endpoint(tcp::v4(), 8080));
+    boost::asio::co_spawn(ioCtx, listener(std::move(acceptor)), boost::asio::detached);
+    ioCtx.run();
+}
+// 测试:
+//   echo "small" | curl -X POST -d @- http://localhost:8080/echo       → "small"
+//   dd if=/dev/zero bs=2048 count=1 | curl -X POST -d @- http://localhost:8080/echo → 413
+```
+
+**要点**：`parser.body_limit(1024)` 在解析过程中检查——Beast 读取 body 时如果超过限制，立即抛出 `http::error::body_limit` 异常，不会把完整 body 读入内存。这与"先全读入再检查大小"相比，节省了内存，是 Hical `handleSession` 中使用 parser 而非直接 `async_read(request)` 的原因。
+
+### 练习 3 参考答案：WebSocket Echo Server
+
+```cpp
+#include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/beast.hpp>
+#include <boost/beast/websocket.hpp>
+#include <iostream>
+
+namespace beast = boost::beast;
+namespace http = beast::http;
+namespace ws = beast::websocket;
+using boost::asio::ip::tcp;
+using boost::asio::awaitable;
+using boost::asio::use_awaitable;
+
+// HTML 页面，内含 WebSocket 客户端
+constexpr const char* kHtmlPage = R"html(
+<!DOCTYPE html><html><body>
+<h1>WebSocket Echo</h1>
+<input id="msg" placeholder="Type message..." />
+<button onclick="send()">Send</button>
+<pre id="log"></pre>
+<script>
+const ws = new WebSocket('ws://' + location.host + '/ws');
+ws.onmessage = e => document.getElementById('log').textContent += e.data + '\n';
+ws.onopen = () => document.getElementById('log').textContent += '[Connected]\n';
+function send() {
+    const msg = document.getElementById('msg').value;
+    ws.send(msg);
+    document.getElementById('msg').value = '';
+}
+</script></body></html>
+)html";
+
+awaitable<void> handleWebSocket(tcp::socket socket, http::request<http::string_body> req)
+{
+    try
+    {
+        ws::stream<tcp::socket> wsStream(std::move(socket));
+        co_await wsStream.async_accept(req, use_awaitable);
+
+        for (;;)
+        {
+            beast::flat_buffer buffer;
+            co_await wsStream.async_read(buffer, use_awaitable);
+            auto msg = beast::buffers_to_string(buffer.data());
+            wsStream.text(wsStream.got_text());  // 保持相同消息类型
+            co_await wsStream.async_write(buffer.data(), use_awaitable);
+        }
+    }
+    catch (const beast::system_error& e)
+    {
+        if (e.code() != ws::error::closed
+            && e.code() != boost::asio::error::eof)
+        {
+            std::cerr << "WS 错误: " << e.what() << std::endl;
+        }
+    }
+}
+
+awaitable<void> handleSession(tcp::socket socket)
+{
+    beast::flat_buffer buffer;
+    http::request<http::string_body> req;
+    co_await http::async_read(socket, buffer, req, use_awaitable);
+
+    // WebSocket 升级检查
+    if (ws::is_upgrade(req) && req.target() == "/ws")
+    {
+        co_await handleWebSocket(std::move(socket), std::move(req));
+        co_return;
+    }
+
+    // 普通 HTTP：返回 HTML 页面
+    http::response<http::string_body> res {http::status::ok, 11};
+    res.set(http::field::content_type, "text/html; charset=utf-8");
+    res.body() = kHtmlPage;
+    res.prepare_payload();
+    co_await http::async_write(socket, res, use_awaitable);
+}
+
+awaitable<void> listener(tcp::acceptor acceptor)
+{
+    for (;;)
+    {
+        auto socket = co_await acceptor.async_accept(use_awaitable);
+        boost::asio::co_spawn(acceptor.get_executor(),
+            handleSession(std::move(socket)), boost::asio::detached);
+    }
+}
+
+int main()
+{
+    boost::asio::io_context ioCtx;
+    tcp::acceptor acceptor(ioCtx, tcp::endpoint(tcp::v4(), 8080));
+    std::cout << "HTTP + WebSocket server on :8080" << std::endl;
+    boost::asio::co_spawn(ioCtx, listener(std::move(acceptor)), boost::asio::detached);
+    ioCtx.run();
+}
+// 测试: 浏览器打开 http://localhost:8080，在输入框中发消息
+```
+
+**要点**：`ws::is_upgrade(req)` 检查 HTTP 请求是否包含 `Upgrade: websocket` 头。一旦确认是升级请求，调用 `wsStream.async_accept(req)` 完成协议切换——此后 socket 不再是 HTTP，而是 WebSocket 帧协议。这就是 Hical `HttpServer::handleSession` 中的分流逻辑：先读一个 HTTP 请求，如果是升级则转入 `handleWebSocket`。
+
+### 练习 4 参考答案：Keep-Alive
+
+```cpp
+#include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/beast.hpp>
+#include <iostream>
+
+namespace beast = boost::beast;
+namespace http = beast::http;
+using boost::asio::ip::tcp;
+using boost::asio::awaitable;
+using boost::asio::use_awaitable;
+
+awaitable<void> handleSession(tcp::socket socket)
+{
+    try
+    {
+        beast::flat_buffer buffer;
+
+        for (;;)  // ← Keep-Alive 循环
+        {
+            http::request<http::string_body> req;
+            co_await http::async_read(socket, buffer, req, use_awaitable);
+
+            http::response<http::string_body> res {http::status::ok, 11};
+            res.set(http::field::content_type, "text/plain");
+            res.body() = "Request #" + std::string(req.target());
+            res.keep_alive(req.keep_alive());  // 镜像客户端的 keep-alive 意愿
+            res.prepare_payload();
+
+            co_await http::async_write(socket, res, use_awaitable);
+
+            if (!res.keep_alive())
+            {
+                break;  // 客户端请求 Connection: close
+            }
+        }
+    }
+    catch (const beast::system_error& e)
+    {
+        if (e.code() != http::error::end_of_stream
+            && e.code() != boost::asio::error::eof)
+        {
+            std::cerr << "错误: " << e.what() << std::endl;
+        }
+    }
+
+    boost::system::error_code ec;
+    socket.shutdown(tcp::socket::shutdown_send, ec);
+}
+
+awaitable<void> listener(tcp::acceptor acceptor)
+{
+    for (;;)
+    {
+        auto socket = co_await acceptor.async_accept(use_awaitable);
+        boost::asio::co_spawn(acceptor.get_executor(),
+            handleSession(std::move(socket)), boost::asio::detached);
+    }
+}
+
+int main()
+{
+    boost::asio::io_context ioCtx;
+    tcp::acceptor acceptor(ioCtx, tcp::endpoint(tcp::v4(), 8080));
+    boost::asio::co_spawn(ioCtx, listener(std::move(acceptor)), boost::asio::detached);
+    ioCtx.run();
+}
+// 测试（观察复用连接）:
+//   curl -v --http1.1 http://localhost:8080/a http://localhost:8080/b http://localhost:8080/c
+//   → 三个请求复用同一个 TCP 连接（观察 "Re-using existing connection" 日志）
+```
+
+**要点**：Keep-Alive 的核心是 `for(;;)` 循环——同一个 TCP 连接上反复读写 HTTP 请求/响应。`res.keep_alive(req.keep_alive())` 将客户端的 keep-alive 意愿镜像到响应中。当客户端发送 `Connection: close` 时，`req.keep_alive()` 返回 false，响应中也设为 false，循环退出。`beast::flat_buffer` 在循环外创建，跨请求复用，避免重复分配。
+
+### 练习 5 参考答案：静态文件服务器
+
+```cpp
+#include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/beast.hpp>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <unordered_map>
+
+namespace beast = boost::beast;
+namespace http = beast::http;
+namespace fs = std::filesystem;
+using boost::asio::ip::tcp;
+using boost::asio::awaitable;
+using boost::asio::use_awaitable;
+
+std::string getMimeType(const std::string& ext)
+{
+    static const std::unordered_map<std::string, std::string> types = {
+        {".html", "text/html; charset=utf-8"},
+        {".css",  "text/css; charset=utf-8"},
+        {".js",   "application/javascript; charset=utf-8"},
+        {".json", "application/json; charset=utf-8"},
+        {".png",  "image/png"},
+        {".jpg",  "image/jpeg"},
+        {".gif",  "image/gif"},
+        {".txt",  "text/plain; charset=utf-8"},
+        {".pdf",  "application/pdf"},
+    };
+    auto it = types.find(ext);
+    return it != types.end() ? it->second : "application/octet-stream";
+}
+
+awaitable<void> handleSession(tcp::socket socket, const fs::path& rootDir)
+{
+    try
+    {
+        beast::flat_buffer buffer;
+        http::request<http::string_body> req;
+        co_await http::async_read(socket, buffer, req, use_awaitable);
+
+        auto target = std::string(req.target());
+
+        // 路径穿越防护：拒绝包含 ".." 的路径
+        if (target.find("..") != std::string::npos)
+        {
+            http::response<http::string_body> res {http::status::forbidden, 11};
+            res.body() = "403 Forbidden";
+            res.prepare_payload();
+            co_await http::async_write(socket, res, use_awaitable);
+            co_return;
+        }
+
+        // 构造文件路径
+        if (target == "/") target = "/index.html";
+        auto filePath = fs::canonical(rootDir) / target.substr(1);  // 去掉前导 /
+
+        // 二次防护：规范化后检查是否仍在根目录下
+        auto canonical = fs::weakly_canonical(filePath);
+        auto rootCanonical = fs::canonical(rootDir);
+        auto rootStr = rootCanonical.string();
+        if (canonical.string().substr(0, rootStr.size()) != rootStr)
+        {
+            http::response<http::string_body> res {http::status::forbidden, 11};
+            res.body() = "403 Forbidden";
+            res.prepare_payload();
+            co_await http::async_write(socket, res, use_awaitable);
+            co_return;
+        }
+
+        // 文件是否存在
+        if (!fs::exists(canonical) || !fs::is_regular_file(canonical))
+        {
+            http::response<http::string_body> res {http::status::not_found, 11};
+            res.body() = "404 Not Found";
+            res.prepare_payload();
+            co_await http::async_write(socket, res, use_awaitable);
+            co_return;
+        }
+
+        // 使用 file_body 零拷贝发送文件
+        http::response<http::file_body> res;
+        res.version(11);
+        res.result(http::status::ok);
+
+        auto ext = canonical.extension().string();
+        res.set(http::field::content_type, getMimeType(ext));
+
+        boost::system::error_code ec;
+        res.body().open(canonical.string().c_str(), beast::file_mode::scan, ec);
+        if (ec)
+        {
+            http::response<http::string_body> errRes {http::status::internal_server_error, 11};
+            errRes.body() = "500 Internal Server Error";
+            errRes.prepare_payload();
+            co_await http::async_write(socket, errRes, use_awaitable);
+            co_return;
+        }
+
+        res.prepare_payload();  // 自动设置 Content-Length
+        co_await http::async_write(socket, res, use_awaitable);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "错误: " << e.what() << std::endl;
+    }
+}
+
+awaitable<void> listener(tcp::acceptor acceptor, fs::path rootDir)
+{
+    for (;;)
+    {
+        auto socket = co_await acceptor.async_accept(use_awaitable);
+        boost::asio::co_spawn(acceptor.get_executor(),
+            handleSession(std::move(socket), rootDir), boost::asio::detached);
+    }
+}
+
+int main(int argc, char* argv[])
+{
+    std::string dir = argc > 1 ? argv[1] : ".";
+    auto rootDir = fs::canonical(dir);
+    std::cout << "静态文件服务器: " << rootDir << " on :8080" << std::endl;
+
+    boost::asio::io_context ioCtx;
+    tcp::acceptor acceptor(ioCtx, tcp::endpoint(tcp::v4(), 8080));
+    boost::asio::co_spawn(ioCtx, listener(std::move(acceptor), rootDir), boost::asio::detached);
+    ioCtx.run();
+}
+// 测试:
+//   mkdir -p public && echo "<h1>Hello</h1>" > public/index.html
+//   ./file_server public
+//   curl http://localhost:8080/              → HTML 内容
+//   curl http://localhost:8080/../etc/passwd → 403 Forbidden
+```
+
+**要点**：
+- **`http::file_body`**：Beast 内置的文件 body 类型，直接从文件读取并发送，避免先把整个文件读入 `std::string`。对大文件非常重要。
+- **路径穿越双重防护**：第一层检查 `..` 子串（快速拒绝）；第二层用 `fs::weakly_canonical()` 规范化后比较前缀（防止 URL 编码绕过）。这与 Hical `StaticFiles.h` 的 `canonical() + isSafePath()` 设计一致。
+
+---
+
 ## 6. 总结与拓展阅读
 
 ### Beast 核心 API 速查表

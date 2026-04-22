@@ -182,7 +182,7 @@ int main()
     // 方式 2：动态构建
     json::object obj;
     obj["name"] = "Hical";
-    obj["version"] = "1.0.0";
+    obj["version"] = "2.0.0";
     obj["features"] = json::array {"coroutine", "pmr", "reflection"};
 
     // 方式 3：从标量值构造
@@ -744,6 +744,393 @@ struct Config
     HICAL_JSON(Config, name, maxRetry)
 };
 ```
+
+---
+
+## 参考答案
+
+### 练习 1 参考答案：JSON 解析与提取
+
+```cpp
+#include <boost/json.hpp>
+#include <iostream>
+#include <string>
+
+namespace json = boost::json;
+
+int main()
+{
+    const char* input = R"({
+        "users": [
+            {"name": "Alice", "age": 30, "active": true},
+            {"name": "Bob", "age": 25, "active": false},
+            {"name": "Charlie", "age": 28, "active": true}
+        ],
+        "total": 3
+    })";
+
+    // 安全解析
+    boost::system::error_code ec;
+    auto val = json::parse(input, ec);
+    if (ec)
+    {
+        std::cerr << "解析失败: " << ec.message() << std::endl;
+        return 1;
+    }
+
+    // 类型检查 + 提取
+    auto& root = val.as_object();
+    auto& users = root.at("users").as_array();
+
+    bool first = true;
+    for (const auto& user : users)
+    {
+        auto& obj = user.as_object();
+        auto name = obj.at("name").as_string();
+        auto age = obj.at("age").as_int64();
+
+        if (!first) std::cout << ", ";
+        std::cout << name << " (" << age << ")";
+        first = false;
+    }
+    std::cout << std::endl;
+    // 输出: Alice (30), Bob (25), Charlie (28)
+
+    // 额外：提取 total 并验证
+    auto total = root.at("total").as_int64();
+    std::cout << "Total: " << total << " (array size: " << users.size() << ")" << std::endl;
+
+    return 0;
+}
+```
+
+**要点**：`as_object()` / `as_array()` / `as_string()` / `as_int64()` 在类型不匹配时抛异常。生产代码应先用 `is_object()` / `if_contains()` 检查。`at()` 在 key 不存在时也会抛异常，比 `operator[]` 更安全（后者返回 null）。
+
+### 练习 2 参考答案：HICAL_JSON 宏实战
+
+```cpp
+#include "core/MetaJson.h"
+#include <cassert>
+#include <iostream>
+
+struct Product
+{
+    std::string name;
+    double price {};
+    int stock {};
+    std::vector<std::string> tags;
+
+    HICAL_JSON(Product, name, price, stock, tags)
+};
+
+int main()
+{
+    // 创建原始对象
+    Product original;
+    original.name = "Widget Pro";
+    original.price = 29.99;
+    original.stock = 150;
+    original.tags = {"electronics", "sale", "new"};
+
+    // 序列化
+    auto json = hical::meta::toJson(original);
+    std::cout << "序列化结果: " << boost::json::serialize(json) << std::endl;
+    // → {"name":"Widget Pro","price":29.99,"stock":150,"tags":["electronics","sale","new"]}
+
+    // 反序列化
+    auto restored = hical::meta::fromJson<Product>(boost::json::value(json));
+
+    // 验证所有字段
+    assert(restored.name == original.name);
+    assert(restored.price == original.price);
+    assert(restored.stock == original.stock);
+    assert(restored.tags.size() == original.tags.size());
+    for (size_t i = 0; i < restored.tags.size(); ++i)
+    {
+        assert(restored.tags[i] == original.tags[i]);
+    }
+
+    std::cout << "所有字段验证通过!" << std::endl;
+
+    // 边界测试：缺少字段
+    auto partial = hical::meta::fromJson<Product>(
+        boost::json::value({{"name", "Minimal"}}));
+    assert(partial.name == "Minimal");
+    assert(partial.price == 0.0);  // 默认值
+    assert(partial.stock == 0);    // 默认值
+    assert(partial.tags.empty());  // 默认值
+    std::cout << "缺少字段测试通过（保持默认值）" << std::endl;
+
+    // 边界测试：多余字段
+    auto extra = hical::meta::fromJson<Product>(
+        boost::json::value({{"name", "Extra"}, {"price", 1.0}, {"stock", 1},
+                            {"tags", boost::json::array{}},
+                            {"unknown_field", "ignored"}}));
+    assert(extra.name == "Extra");
+    std::cout << "多余字段测试通过（静默忽略）" << std::endl;
+
+    return 0;
+}
+```
+
+**要点**：`HICAL_JSON` 宏支持 `std::vector<std::string>` 等容器类型——`valueToJson` 中的 `IsVector<T>` 分支处理数组序列化，`valueFromJson` 对应处理反序列化。`fromJson` 对缺少字段保持默认值、多余字段静默忽略，这是框架前向/后向兼容的关键设计。
+
+### 练习 3 参考答案：安全 JSON 验证器
+
+```cpp
+#include <boost/json.hpp>
+#include <iostream>
+#include <string>
+#include <vector>
+
+std::string validateJson(const std::string& input)
+{
+    boost::system::error_code ec;
+    boost::json::parse(input, ec);
+
+    if (ec)
+    {
+        return "Invalid: " + ec.message();
+    }
+    return "Valid JSON";
+}
+
+int main()
+{
+    struct TestCase
+    {
+        std::string input;
+        std::string description;
+    };
+
+    std::vector<TestCase> tests = {
+        {R"({"name": "Alice", "age": 30})", "合法 JSON 对象"},
+        {R"([1, 2, 3])", "合法 JSON 数组"},
+        {R"("hello")", "合法 JSON 字符串"},
+        {R"(42)", "合法 JSON 数字"},
+        {R"(true)", "合法 JSON 布尔"},
+        {R"(null)", "合法 JSON null"},
+        {R"({name: "Alice"})", "缺少引号的 key"},
+        {R"({"name": "Alice",})", "尾随逗号"},
+        {R"()", "空字符串"},
+        {R"({)", "不完整的对象"},
+        {R"([1, 2,, 3])", "多余逗号"},
+        {R"({"a": undefined})", "非法值 undefined"},
+    };
+
+    for (const auto& test : tests)
+    {
+        auto result = validateJson(test.input);
+        std::cout << "[" << (result == "Valid JSON" ? "PASS" : "FAIL")
+                  << "] " << test.description << std::endl;
+        std::cout << "  输入: " << (test.input.empty() ? "(空)" : test.input) << std::endl;
+        std::cout << "  结果: " << result << std::endl;
+        std::cout << std::endl;
+    }
+
+    return 0;
+}
+```
+
+**要点**：`json::parse(str, ec)` 是 error_code 重载——解析失败不抛异常，而是设置 `ec`。这与 Hical `HttpRequest::jsonBody()` 的设计一致（解析失败返回 null 而非抛异常），让上层可以优雅地返回 400 Bad Request。Boost.JSON 的 parser 是严格模式（不允许尾随逗号、注释等非标准扩展），这对安全验证是正确的选择。
+
+### 练习 4 参考答案：PMR 性能对比
+
+```cpp
+#include <boost/json.hpp>
+#include <chrono>
+#include <iostream>
+#include <memory_resource>
+
+namespace json = boost::json;
+
+void benchDefault(int iterations)
+{
+    auto start = std::chrono::high_resolution_clock::now();
+
+    for (int i = 0; i < iterations; ++i)
+    {
+        std::string str = R"({"id": )" + std::to_string(i) + R"(, "name": "user_)"
+                          + std::to_string(i) + R"("})";
+        auto val = json::parse(str);
+        // val 析构时用默认 new/delete 释放
+    }
+
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    std::cout << "默认分配器:    " << ms << " ms" << std::endl;
+}
+
+void benchMonotonic(int iterations)
+{
+    auto start = std::chrono::high_resolution_clock::now();
+
+    // 预分配 1MB 缓冲区
+    char buffer[1024 * 1024];
+    std::pmr::monotonic_buffer_resource pool(buffer, sizeof(buffer));
+
+    for (int i = 0; i < iterations; ++i)
+    {
+        std::string str = R"({"id": )" + std::to_string(i) + R"(, "name": "user_)"
+                          + std::to_string(i) + R"("})";
+
+        // 使用 PMR 分配器解析
+        json::storage_ptr sp = json::make_shared_resource<json::monotonic_resource>();
+        auto val = json::parse(str, sp);
+        // monotonic_resource 析构时整体释放
+    }
+
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    std::cout << "monotonic 池:  " << ms << " ms" << std::endl;
+}
+
+void benchPoolResource(int iterations)
+{
+    auto start = std::chrono::high_resolution_clock::now();
+
+    for (int i = 0; i < iterations; ++i)
+    {
+        std::string str = R"({"id": )" + std::to_string(i) + R"(, "name": "user_)"
+                          + std::to_string(i) + R"("})";
+
+        // Boost.JSON 自带的 monotonic_resource（优化版）
+        json::monotonic_resource mr;
+        auto val = json::parse(str, &mr);
+    }
+
+    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    std::cout << "json::monotonic: " << ms << " ms" << std::endl;
+}
+
+int main()
+{
+    constexpr int kIterations = 100000;
+    std::cout << "解析 " << kIterations << " 个 JSON 对象的性能对比" << std::endl;
+    std::cout << "===========================================" << std::endl;
+
+    benchDefault(kIterations);
+    benchMonotonic(kIterations);
+    benchPoolResource(kIterations);
+
+    // 预期结果（Release 模式）:
+    // 默认分配器:     ~150 ms
+    // monotonic 池:   ~80 ms
+    // json::monotonic: ~60 ms
+    //
+    // json::monotonic_resource 是 Boost.JSON 为 JSON 解析场景
+    // 专门优化的分配器，比通用 std::pmr::monotonic_buffer_resource 更快
+
+    return 0;
+}
+// 编译（必须 Release 模式）: g++ -std=c++20 -O2 bench.cpp -lboost_json -o bench
+```
+
+**要点**：`json::monotonic_resource` 是 Boost.JSON 自带的优化版单调池，比 `std::pmr::monotonic_buffer_resource` 更快（内部针对 JSON 节点大小做了对齐优化）。这与 Hical 的三级 PMR 策略互补——Hical 在 `handleSession` 中用 `std::pmr::monotonic_buffer_resource` 给 Beast 的 `flat_buffer` 使用，JSON 解析可以进一步用 `json::monotonic_resource` 加速。**必须用 Release 模式编译**，Debug 模式的性能数据没有参考价值。
+
+### 练习 5 参考答案：扩展 valueToJson 支持 optional
+
+```cpp
+#include "core/MetaJson.h"
+#include <cassert>
+#include <iostream>
+#include <optional>
+
+namespace hical::meta::detail
+{
+
+// 检测 std::optional 的类型萃取
+template <typename T>
+struct IsOptional : std::false_type {};
+
+template <typename T>
+struct IsOptional<std::optional<T>> : std::true_type {};
+
+// valueToJson 的 optional 特化
+// 需要在 MetaJson.h 的 valueToJson 中添加这个分支：
+//
+// else if constexpr (IsOptional<T>::value)
+// {
+//     if (val.has_value())
+//         return valueToJson(*val);    // 递归序列化内部值
+//     else
+//         return boost::json::value(nullptr);  // nullopt → JSON null
+// }
+
+// valueFromJson 的 optional 特化
+// 需要在 MetaJson.h 的 valueFromJson 中添加这个分支：
+//
+// else if constexpr (IsOptional<T>::value)
+// {
+//     if (val.is_null())
+//         return std::nullopt;
+//     return valueFromJson<typename T::value_type>(val);
+// }
+
+} // namespace hical::meta::detail
+
+// 示例 DTO
+struct Config
+{
+    std::string name;
+    std::optional<int> maxRetry;
+    std::optional<std::string> description;
+
+    HICAL_JSON(Config, name, maxRetry, description)
+};
+
+int main()
+{
+    // 测试 1：所有字段都有值
+    Config full {"server", 3, "主配置"};
+    auto json1 = hical::meta::toJson(full);
+    std::cout << "完整: " << boost::json::serialize(json1) << std::endl;
+    // → {"name":"server","maxRetry":3,"description":"主配置"}
+
+    // 测试 2：optional 字段为空
+    Config partial {"client", std::nullopt, std::nullopt};
+    auto json2 = hical::meta::toJson(partial);
+    std::cout << "部分: " << boost::json::serialize(json2) << std::endl;
+    // → {"name":"client","maxRetry":null,"description":null}
+
+    // 测试 3：反序列化（JSON null → nullopt）
+    auto restored = hical::meta::fromJson<Config>(boost::json::value(json2));
+    assert(restored.name == "client");
+    assert(!restored.maxRetry.has_value());
+    assert(!restored.description.has_value());
+
+    // 测试 4：反序列化（JSON 字段缺失 → nullopt）
+    auto minimal = hical::meta::fromJson<Config>(
+        boost::json::value({{"name", "minimal"}}));
+    assert(!minimal.maxRetry.has_value());
+    std::cout << "所有测试通过!" << std::endl;
+
+    return 0;
+}
+```
+
+**完整的 MetaJson.h 修改**（需要在 `valueToJson` 和 `valueFromJson` 的 `if constexpr` 链中各插入一个分支）：
+
+```cpp
+// 在 valueToJson 中，IsVector 分支之后添加：
+else if constexpr (detail::IsOptional<T>::value)
+{
+    if (val.has_value())
+        return valueToJson(*val);
+    return boost::json::value(nullptr);
+}
+
+// 在 valueFromJson 中，IsVector 分支之后添加：
+else if constexpr (detail::IsOptional<T>::value)
+{
+    if (val.is_null())
+        return T {std::nullopt};
+    return T {valueFromJson<typename T::value_type>(val)};
+}
+```
+
+**要点**：`std::optional<T>` 的序列化语义是：`has_value()` → 递归序列化内部值；`nullopt` → JSON `null`。反序列化反过来：JSON `null` → `nullopt`；其他值 → 递归反序列化后包装为 `optional<T>`。这个扩展遵循了 MetaJson 的设计范式——用 `if constexpr` 类型萃取做编译期分发，用 `IsOptional` 模板特化检测类型。`static_assert(sizeof(T) == 0)` 兜底确保不支持的类型在编译期报错而非运行时崩溃。
 
 ---
 

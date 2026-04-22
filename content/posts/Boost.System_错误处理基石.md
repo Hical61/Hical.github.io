@@ -639,6 +639,158 @@ Hical 中错误处理的经验法则：
 
 ---
 
+## 参考答案
+
+### 练习 1 参考答案
+
+```cpp
+#include <boost/asio.hpp>
+#include <iostream>
+
+int main()
+{
+    boost::asio::io_context ioCtx;
+    boost::asio::ip::tcp::resolver resolver(ioCtx);
+    boost::system::error_code ec;
+
+    // 成功解析
+    auto results = resolver.resolve("www.google.com", "80", ec);
+    if (!ec)
+    {
+        std::cout << "解析成功，error_code: " << ec.message() << std::endl;
+        for (const auto& entry : results)
+        {
+            std::cout << "  " << entry.endpoint() << std::endl;
+        }
+    }
+
+    // 失败解析
+    resolver.resolve("this.domain.does.not.exist.invalid", "80", ec);
+    if (ec)
+    {
+        std::cout << "解析失败" << std::endl;
+        std::cout << "  value:    " << ec.value() << std::endl;
+        std::cout << "  category: " << ec.category().name() << std::endl;
+        std::cout << "  message:  " << ec.message() << std::endl;
+        // 典型输出：value=11003 (Windows) 或 value=-2 (Linux)
+        //          message: "Host not found (non-authoritative)" 或 "Name or service not known"
+    }
+
+    return 0;
+}
+// 编译: g++ -std=c++20 -O2 ex1.cpp -lboost_system -lpthread -o ex1
+```
+
+**要点**：同一个"域名不存在"错误在 Windows 和 Linux 上的 `value` 不同（Windows 用 WSAHOST_NOT_FOUND=11001，Linux 用 EAI_NONAME=-2），但都可以通过 `ec.message()` 获取人类可读描述。这正是 `error_code` 的 category 机制的价值——同一个语义在不同平台有不同的数值表示。
+
+### 练习 2 参考答案
+
+```cpp
+#include <boost/system/error_code.hpp>
+#include <iostream>
+#include <string>
+
+// 1. 定义错误码枚举
+enum class GameError
+{
+    PlayerNotFound = 1,
+    InventoryFull = 2,
+    InsufficientGold = 3,
+    LevelTooLow = 4
+};
+
+// 2. 实现 error_category
+class GameErrorCategory : public boost::system::error_category
+{
+public:
+    const char* name() const noexcept override
+    {
+        return "game";
+    }
+
+    std::string message(int ev) const override
+    {
+        switch (static_cast<GameError>(ev))
+        {
+            case GameError::PlayerNotFound:   return "Player not found";
+            case GameError::InventoryFull:    return "Inventory is full";
+            case GameError::InsufficientGold: return "Insufficient gold";
+            case GameError::LevelTooLow:      return "Level too low";
+            default:                          return "Unknown game error";
+        }
+    }
+};
+
+// 3. 全局单例
+inline const GameErrorCategory& gameCategory()
+{
+    static GameErrorCategory instance;
+    return instance;
+}
+
+// 4. make_error_code 自由函数
+inline boost::system::error_code make_error_code(GameError e)
+{
+    return {static_cast<int>(e), gameCategory()};
+}
+
+// 5. is_error_code_enum 特化——让 error_code 能隐式从 GameError 构造
+namespace boost::system
+{
+    template <>
+    struct is_error_code_enum<GameError> : std::true_type {};
+}
+
+int main()
+{
+    // 隐式转换：GameError → error_code
+    boost::system::error_code ec = GameError::InventoryFull;
+
+    std::cout << "category: " << ec.category().name() << std::endl;  // "game"
+    std::cout << "value:    " << ec.value() << std::endl;            // 2
+    std::cout << "message:  " << ec.message() << std::endl;          // "Inventory is full"
+    std::cout << "bool:     " << (ec ? "true" : "false") << std::endl; // "true"
+
+    // 无错误
+    boost::system::error_code ok;
+    std::cout << "ok bool:  " << (ok ? "true" : "false") << std::endl; // "false"
+
+    // 在条件判断中使用
+    ec = GameError::LevelTooLow;
+    if (ec)
+    {
+        std::cout << "操作失败: " << ec.message() << std::endl;
+    }
+
+    return 0;
+}
+```
+
+**要点**：
+- `error_category` 是单例（`static` 局部变量），所有同类错误码共享一个 category 对象
+- `is_error_code_enum` 特化使 `error_code ec = GameError::InventoryFull` 隐式调用 `make_error_code`
+- 这个模式与 Hical 的 `ErrorCode` 枚举 + `fromBoostError()` 映射层设计思路一致
+
+### 练习 3 参考答案
+
+**Q1：`fromBoostError()` 为什么要做两层映射？**
+
+> 因为 Boost.Asio 的 `error_code` 来自两种不同的 category：
+> - **第一层**（Asio 常量）：`boost::asio::error::eof`、`boost::asio::error::connection_reset` 等，这些是 Asio 自定义的跨平台错误枚举，值在所有平台一致。优先匹配它们效率最高。
+> - **第二层**（平台原始值）：某些错误 Asio 不提供跨平台常量，只通过 `system_category()` 或 `generic_category()` 返回操作系统的原始错误码（如 Linux 的 `ECONNRESET=104`、Windows 的 `WSAECONNRESET=10054`）。第二层用 `#ifdef _WIN32` 分支处理这些差异。
+>
+> 如果只做第一层，一些平台特有的错误码无法被识别；如果只做第二层，就要为每个平台分别写所有映射。两层配合是最完整的覆盖策略。
+
+**Q2：如果 category 既不是 `system_category` 也不是 `generic_category`，会返回什么？**
+
+> 返回 `ErrorCode::hUnknown`（值 `0xFFFF`）。函数末尾的兜底 `return ErrorCode::hUnknown;` 处理了所有未匹配的情况。SSL 错误的 category 是 `boost::asio::error::get_ssl_category()`，它不在前两层的匹配范围内，但如果其 `value()` 恰好匹配了第一层的某些 Asio 常量（如 `operation_aborted`），仍然可以被正确映射。
+
+**Q3：`toNetworkError()` 的 `message` 字段来自哪里？**
+
+> 来自 `boost::system::error_code::message()` 方法——即操作系统原始的错误描述字符串。例如 Linux 上 `ECONNRESET` 返回 `"Connection reset by peer"`，Windows 上 `WSAECONNRESET` 返回 `"An existing connection was forcibly closed by the remote host"`。这个描述比框架的 `errorCodeToString()` 更详细（后者返回统一的英文描述），两者互补。
+
+---
+
 ## 6. 总结与拓展阅读
 
 ### 核心要点

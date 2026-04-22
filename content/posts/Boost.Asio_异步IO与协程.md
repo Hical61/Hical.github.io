@@ -1148,6 +1148,352 @@ Awaitable<void> GenericConnection<SocketType>::sslHandshake()
 
 ---
 
+## 参考答案
+
+### 练习 1 参考答案：协程式 Echo Server
+
+```cpp
+#include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <iostream>
+
+using boost::asio::ip::tcp;
+using boost::asio::awaitable;
+using boost::asio::use_awaitable;
+
+awaitable<void> handleSession(tcp::socket socket)
+{
+    try
+    {
+        char buf[1024];
+        for (;;)
+        {
+            auto n = co_await socket.async_read_some(
+                boost::asio::buffer(buf), use_awaitable);
+            co_await boost::asio::async_write(
+                socket, boost::asio::buffer(buf, n), use_awaitable);
+        }
+    }
+    catch (const boost::system::system_error& e)
+    {
+        if (e.code() != boost::asio::error::eof)
+        {
+            std::cerr << "会话错误: " << e.what() << std::endl;
+        }
+        // EOF = 客户端正常断开，静默处理
+    }
+}
+
+awaitable<void> listener(tcp::acceptor acceptor)
+{
+    for (;;)
+    {
+        auto socket = co_await acceptor.async_accept(use_awaitable);
+        std::cout << "新连接: " << socket.remote_endpoint() << std::endl;
+        boost::asio::co_spawn(
+            acceptor.get_executor(),
+            handleSession(std::move(socket)),
+            boost::asio::detached);
+    }
+}
+
+int main()
+{
+    boost::asio::io_context ioCtx;
+    tcp::acceptor acceptor(ioCtx, tcp::endpoint(tcp::v4(), 8888));
+    std::cout << "Echo server 监听端口 8888..." << std::endl;
+
+    boost::asio::co_spawn(ioCtx, listener(std::move(acceptor)), boost::asio::detached);
+    ioCtx.run();
+}
+// 编译: g++ -std=c++20 -O2 echo.cpp -lboost_system -lpthread -o echo
+// 测试: telnet localhost 8888 或 nc localhost 8888
+```
+
+**要点**：每个 `handleSession` 是独立协程，`co_await async_read_some` 挂起时不阻塞线程，其他协程可以并发运行。EOF 通过 `system_error` 异常捕获（code == `boost::asio::error::eof`），是客户端正常断开的信号。
+
+### 练习 2 参考答案：周期性日志
+
+```cpp
+#include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <iostream>
+
+using boost::asio::awaitable;
+using boost::asio::use_awaitable;
+
+awaitable<void> periodicLogger(int intervalSec, int maxCount)
+{
+    auto executor = co_await boost::asio::this_coro::executor;
+
+    for (int i = 1; i <= maxCount; ++i)
+    {
+        boost::asio::steady_timer timer(
+            executor, std::chrono::seconds(intervalSec));
+        co_await timer.async_wait(use_awaitable);
+
+        auto now = std::chrono::system_clock::now();
+        auto timeT = std::chrono::system_clock::to_time_t(now);
+        std::cout << "[" << std::put_time(std::localtime(&timeT), "%H:%M:%S")
+                  << "] 日志 #" << i << "/" << maxCount << std::endl;
+    }
+    std::cout << "日志输出完毕，退出" << std::endl;
+}
+
+int main()
+{
+    boost::asio::io_context ioCtx;
+    boost::asio::co_spawn(ioCtx, periodicLogger(2, 10), boost::asio::detached);
+    ioCtx.run();  // 10 次日志输出后 io_context 自然退出（无 work_guard）
+}
+```
+
+**要点**：无需 `work_guard`——协程自身就是 io_context 的"工作"。当 `periodicLogger` 协程 `co_return` 后，io_context 没有其他待处理任务，`run()` 自然返回。定时器在协程内创建，每次循环是一个新定时器（栈上对象，循环结束自动析构）。
+
+### 练习 3 参考答案：多 io_context 模型
+
+```cpp
+#include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <atomic>
+#include <iostream>
+#include <thread>
+#include <vector>
+
+using boost::asio::ip::tcp;
+using boost::asio::awaitable;
+using boost::asio::use_awaitable;
+
+awaitable<void> handleSession(tcp::socket socket)
+{
+    try
+    {
+        char buf[1024];
+        for (;;)
+        {
+            auto n = co_await socket.async_read_some(
+                boost::asio::buffer(buf), use_awaitable);
+            co_await boost::asio::async_write(
+                socket, boost::asio::buffer(buf, n), use_awaitable);
+        }
+    }
+    catch (...) {}
+}
+
+int main()
+{
+    constexpr int kWorkers = 4;
+
+    // 主 io_context（accept 专用）
+    boost::asio::io_context mainCtx;
+
+    // Worker io_context 数组
+    std::vector<std::unique_ptr<boost::asio::io_context>> workerCtxs;
+    std::vector<std::unique_ptr<boost::asio::io_context::work>> workGuards;
+    std::vector<std::thread> workerThreads;
+
+    for (int i = 0; i < kWorkers; ++i)
+    {
+        auto ctx = std::make_unique<boost::asio::io_context>();
+        workGuards.push_back(
+            std::make_unique<boost::asio::io_context::work>(*ctx));
+        auto* ctxPtr = ctx.get();
+        workerThreads.emplace_back([ctxPtr] { ctxPtr->run(); });
+        workerCtxs.push_back(std::move(ctx));
+    }
+
+    // round-robin 计数器
+    std::atomic<size_t> nextWorker {0};
+
+    // accept 协程
+    tcp::acceptor acceptor(mainCtx, tcp::endpoint(tcp::v4(), 8888));
+    std::cout << "Multi-io_context echo server (4 workers) on port 8888" << std::endl;
+
+    boost::asio::co_spawn(mainCtx, [&]() -> awaitable<void>
+    {
+        for (;;)
+        {
+            auto socket = co_await acceptor.async_accept(use_awaitable);
+            // round-robin 选择 worker
+            size_t idx = nextWorker.fetch_add(1) % kWorkers;
+            auto& workerCtx = *workerCtxs[idx];
+
+            // 将 socket 移动到 worker 的 io_context 上
+            auto workerSocket = tcp::socket(workerCtx, socket.release());
+            boost::asio::co_spawn(
+                workerCtx, handleSession(std::move(workerSocket)),
+                boost::asio::detached);
+        }
+    }, boost::asio::detached);
+
+    mainCtx.run();
+
+    // 清理
+    workGuards.clear();  // 释放 work_guard → worker ctx 可以退出
+    for (auto& t : workerThreads) t.join();
+}
+```
+
+**要点**：这就是 Hical `EventLoopPool` 的简化版。关键在 `socket.release()` 从主 io_context 取出原始 fd，再用 worker 的 io_context 重新包装——socket 必须绑定到它将被使用的 io_context 上。`work_guard` 保证 worker 线程不会因为暂时没有连接而退出。
+
+### 练习 4 参考答案：SSL Echo Server
+
+```cpp
+#include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/ssl.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <iostream>
+
+using boost::asio::ip::tcp;
+using boost::asio::awaitable;
+using boost::asio::use_awaitable;
+namespace ssl = boost::asio::ssl;
+
+awaitable<void> handleSession(ssl::stream<tcp::socket> stream)
+{
+    try
+    {
+        // TLS 握手
+        co_await stream.async_handshake(ssl::stream_base::server, use_awaitable);
+
+        char buf[1024];
+        for (;;)
+        {
+            auto n = co_await stream.async_read_some(
+                boost::asio::buffer(buf), use_awaitable);
+            co_await boost::asio::async_write(
+                stream, boost::asio::buffer(buf, n), use_awaitable);
+        }
+    }
+    catch (const boost::system::system_error& e)
+    {
+        if (e.code() != boost::asio::error::eof
+            && e.code() != boost::asio::ssl::error::stream_truncated)
+        {
+            std::cerr << "SSL 会话错误: " << e.what() << std::endl;
+        }
+    }
+}
+
+int main()
+{
+    boost::asio::io_context ioCtx;
+
+    // SSL 上下文配置
+    ssl::context sslCtx(ssl::context::tls_server);
+    sslCtx.use_certificate_chain_file("cert.pem");
+    sslCtx.use_private_key_file("key.pem", ssl::context::pem);
+
+    tcp::acceptor acceptor(ioCtx, tcp::endpoint(tcp::v4(), 8888));
+    std::cout << "SSL Echo server on port 8888" << std::endl;
+
+    boost::asio::co_spawn(ioCtx, [&]() -> awaitable<void>
+    {
+        for (;;)
+        {
+            auto socket = co_await acceptor.async_accept(use_awaitable);
+            ssl::stream<tcp::socket> sslStream(std::move(socket), sslCtx);
+            boost::asio::co_spawn(
+                ioCtx, handleSession(std::move(sslStream)),
+                boost::asio::detached);
+        }
+    }, boost::asio::detached);
+
+    ioCtx.run();
+}
+// 生成自签名证书:
+//   openssl req -x509 -nodes -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365
+// 测试:
+//   openssl s_client -connect localhost:8888
+//   然后输入文本，会收到回显
+```
+
+**要点**：与普通 echo server 的区别只有三处：(1) 创建 `ssl::context` 并加载证书/密钥；(2) accept 后用 `ssl::stream<tcp::socket>` 包装 socket；(3) 读写前先 `async_handshake`。这正是 Hical `GenericConnection<SocketType>` 用 `if constexpr` 统一两种连接的设计思路——读写循环代码完全相同，只有握手和关闭有差异。
+
+### 练习 5 参考答案：协程式 HTTP 客户端
+
+```cpp
+#include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/beast.hpp>
+#include <iostream>
+
+namespace beast = boost::beast;
+namespace http = beast::http;
+using boost::asio::ip::tcp;
+using boost::asio::awaitable;
+using boost::asio::use_awaitable;
+
+awaitable<void> httpGet(const std::string& host, const std::string& target)
+{
+    auto executor = co_await boost::asio::this_coro::executor;
+
+    // DNS 解析
+    tcp::resolver resolver(executor);
+    auto results = co_await resolver.async_resolve(host, "80", use_awaitable);
+
+    // TCP 连接
+    beast::tcp_stream stream(executor);
+    co_await stream.async_connect(results, use_awaitable);
+
+    // 构建 HTTP GET 请求
+    http::request<http::string_body> req(http::verb::get, target, 11);
+    req.set(http::field::host, host);
+    req.set(http::field::user_agent, "BoostExercise/1.0");
+
+    // 发送请求
+    co_await http::async_write(stream, req, use_awaitable);
+
+    // 读取响应
+    beast::flat_buffer buffer;
+    http::response<http::string_body> res;
+    co_await http::async_read(stream, buffer, res, use_awaitable);
+
+    // 输出结果
+    std::cout << "Status: " << res.result_int() << " " << res.reason() << std::endl;
+    std::cout << "Headers:" << std::endl;
+    for (const auto& field : res)
+    {
+        std::cout << "  " << field.name_string() << ": " << field.value() << std::endl;
+    }
+    std::cout << "Body (" << res.body().size() << " bytes):" << std::endl;
+    std::cout << res.body().substr(0, 500) << std::endl;  // 只打印前 500 字符
+
+    // 优雅关闭
+    boost::system::error_code ec;
+    stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+}
+
+int main(int argc, char* argv[])
+{
+    std::string host = argc > 1 ? argv[1] : "httpbin.org";
+    std::string target = argc > 2 ? argv[2] : "/get";
+
+    boost::asio::io_context ioCtx;
+    boost::asio::co_spawn(ioCtx, httpGet(host, target), boost::asio::detached);
+    ioCtx.run();
+}
+// 编译: g++ -std=c++20 -O2 http_client.cpp -lboost_system -lpthread -o http_client
+// 运行: ./http_client httpbin.org /get
+```
+
+**要点**：这个客户端展示了 Beast 的 HTTP 协议栈如何构建在 Asio 之上——resolver 做 DNS 解析，tcp_stream 做 TCP 连接，`http::async_write/read` 做 HTTP 请求/响应的序列化/解析。全程 `co_await`，代码像同步调用一样线性可读。`beast::tcp_stream` 是 Beast 对 `tcp::socket` 的封装，增加了超时控制等功能。
+
+---
+
 ## 6. 总结与拓展阅读
 
 ### 核心 API 速查表
