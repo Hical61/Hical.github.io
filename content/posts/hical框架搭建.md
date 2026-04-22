@@ -1,17 +1,17 @@
 +++
-title = '搭建 hical HTTP 服务器 — 多平台环境搭建指南'
+title = '搭建 Hical HTTP 服务器 — 多平台环境搭建指南'
 date = '2026-04-22'
 draft = false
-tags = ["C++", "hical", "环境搭建", "vcpkg", "Conan", "跨平台"]
-categories = ["hical 框架"]
-description = "hical v2.0.0 在所有支持平台上的环境搭建，包括 vcpkg / Conan / 源码编译三种安装方式。"
+tags = ["C++", "Hical", "环境搭建", "vcpkg", "Conan", "跨平台"]
+categories = ["Hical 框架"]
+description = "Hical v2.0.0 在所有支持平台上的环境搭建，包括 vcpkg / Conan / 源码编译三种安装方式。"
 +++
 
-# 搭建 hical HTTP 服务器 — 多平台环境搭建指南
+# 搭建 Hical HTTP 服务器 — 多平台环境搭建指南
 
 ## 概述
 
-本文档涵盖 hical v2.0.0 在所有支持平台上的环境搭建，包括三种安装方式（vcpkg / Conan / 源码编译）和五个平台（Windows MSYS2、Windows MSVC、Ubuntu/Debian、Fedora/Arch、macOS）。
+本文档涵盖 Hical v2.0.0 在所有支持平台上的环境搭建，包括三种安装方式（vcpkg / Conan / 源码编译）和五个平台（Windows MSYS2、Windows MSVC、Ubuntu/Debian、Fedora/Arch、macOS）。
 
 ---
 
@@ -41,10 +41,10 @@ cd vcpkg && ./bootstrap-vcpkg.sh  # Linux / macOS
 
 将 vcpkg 目录加入 `PATH`，或记住安装路径用于后续 `CMAKE_TOOLCHAIN_FILE`。
 
-### 安装 hical
+### 安装 Hical
 
 ```bash
-vcpkg install hical61-hical
+vcpkg install Hical61-Hical
 ```
 
 ### CMakeLists.txt 配置
@@ -56,10 +56,10 @@ project(my_server LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(hical CONFIG REQUIRED)
+find_package(Hical CONFIG REQUIRED)
 
 add_executable(my_server main.cpp)
-target_link_libraries(my_server PRIVATE hical::hical_core)
+target_link_libraries(my_server PRIVATE Hical::Hical_core)
 ```
 
 ### 编译
@@ -80,7 +80,7 @@ cmake --build build -j$(nproc)
 ### 命令行安装
 
 ```bash
-conan install --requires="hical/2.0.0" --build=missing
+conan install --requires="Hical/2.0.0" --build=missing
 ```
 
 ### 使用 conanfile.txt
@@ -89,7 +89,7 @@ conan install --requires="hical/2.0.0" --build=missing
 
 ```ini
 [requires]
-hical/2.0.0
+Hical/2.0.0
 
 [generators]
 CMakeDeps
@@ -111,10 +111,10 @@ project(my_server LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(hical REQUIRED)
+find_package(Hical REQUIRED)
 
 add_executable(my_server main.cpp)
-target_link_libraries(my_server PRIVATE hical::hical_core)
+target_link_libraries(my_server PRIVATE Hical::Hical_core)
 ```
 
 ### 编译
@@ -125,7 +125,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
 cmake --build build -j$(nproc)
 ```
 
-> **提示：** 若 hical 尚未进入 Conan Center，可直接从仓库创建本地包：
+> **提示：** 若 Hical 尚未进入 Conan Center，可直接从仓库创建本地包：
 > ```bash
 > git clone https://github.com/Hical61/Hical.git
 > conan create Hical/ --build=missing
@@ -167,7 +167,7 @@ cmake --build build
 ```
 
 **CMakeLists.txt 要点：**
-- 需要 `add_compile_definitions(_WIN32_WINNT=0x0A00)`（hical 根 CMakeLists.txt 已包含）
+- 需要 `add_compile_definitions(_WIN32_WINNT=0x0A00)`（Hical 根 CMakeLists.txt 已包含）
 - 下游项目链接时需要额外链接 `ws2_32 mswsock`（Windows Socket 库）
 
 **中文乱码修复：** PowerShell 执行 `chcp 65001`
@@ -356,7 +356,7 @@ ctest --test-dir build --output-on-failure --timeout 60 -j4
 
 ## 下游项目 CMakeLists.txt 示例
 
-### 使用 vcpkg 或 Conan 安装的 hical
+### 使用 vcpkg 或 Conan 安装的 Hical
 
 ```cmake
 cmake_minimum_required(VERSION 3.20)
@@ -366,11 +366,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # vcpkg 用 CONFIG, Conan 不需要
-find_package(hical CONFIG REQUIRED)    # vcpkg
-# find_package(hical REQUIRED)         # Conan
+find_package(Hical CONFIG REQUIRED)    # vcpkg
+# find_package(Hical REQUIRED)         # Conan
 
 add_executable(my_server main.cpp)
-target_link_libraries(my_server PRIVATE hical::hical_core)
+target_link_libraries(my_server PRIVATE Hical::Hical_core)
 ```
 
 ### 使用 add_subdirectory 引入源码
@@ -385,11 +385,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Boost 1.70 REQUIRED COMPONENTS system json)
 find_package(OpenSSL REQUIRED)
 
-# 引入 hical 源码（路径按实际修改）
-add_subdirectory(/path/to/Hical ${CMAKE_BINARY_DIR}/hical)
+# 引入 Hical 源码（路径按实际修改）
+add_subdirectory(/path/to/Hical ${CMAKE_BINARY_DIR}/Hical)
 
 add_executable(my_server main.cpp)
-target_link_libraries(my_server PRIVATE hical_core)
+target_link_libraries(my_server PRIVATE Hical_core)
 
 # Windows 平台需要额外链接 Winsock 库
 if(WIN32)
@@ -397,7 +397,7 @@ if(WIN32)
 endif()
 ```
 
-> `_WIN32_WINNT` 宏已在 hical 根 CMakeLists.txt 中通过 `if(MSVC)` 分支定义。
+> `_WIN32_WINNT` 宏已在 Hical 根 CMakeLists.txt 中通过 `if(MSVC)` 分支定义。
 > 使用 MinGW 时不会自动定义，下游项目如遇相关警告可自行添加 `add_compile_definitions(_WIN32_WINNT=0x0A00)`。
 
 ---
@@ -407,11 +407,11 @@ endif()
 需要支持 C++26 反射的编译器（Clang 实验性支持）：
 
 ```bash
-cmake -B build -DHICAL_ENABLE_REFLECTION=ON -DCMAKE_BUILD_TYPE=Release
+cmake -B build -DHical_ENABLE_REFLECTION=ON -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-当编译器不支持 P2996 时，框架自动回退到 C++20 宏方案（`HICAL_JSON` / `HICAL_ROUTES`），用户代码无需修改。
+当编译器不支持 P2996 时，框架自动回退到 C++20 宏方案（`Hical_JSON` / `Hical_ROUTES`），用户代码无需修改。
 
 ---
 
@@ -429,7 +429,7 @@ cmake --build build
 
 ```bash
 curl http://localhost:8080/
-# 预期输出: Hello, hical!
+# 预期输出: Hello, Hical!
 ```
 
 ---
@@ -468,18 +468,18 @@ ctest --test-dir build -C Release --output-on-failure
 chcp 65001
 ```
 
-### Q: vcpkg 找不到 hical 包
+### Q: vcpkg 找不到 Hical 包
 
 确保 vcpkg 已更新到最新：
 
 ```bash
 cd vcpkg && git pull && vcpkg x-update-baseline --add-initial-baseline
-vcpkg install hical61-hical
+vcpkg install Hical61-Hical
 ```
 
-### Q: Conan 找不到 hical 包
+### Q: Conan 找不到 Hical 包
 
-若 hical 尚未进入 Conan Center，从源码创建本地包：
+若 Hical 尚未进入 Conan Center，从源码创建本地包：
 
 ```bash
 git clone https://github.com/Hical61/Hical.git
