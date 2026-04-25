@@ -3,7 +3,7 @@ title = '搭建 Hical HTTP 服务器 — 多平台环境搭建指南'
 date = '2026-04-22'
 draft = false
 tags = ["C++", "Hical", "环境搭建", "vcpkg", "Conan", "跨平台"]
-categories = ["Hical 框架"]
+categories = ["Hical框架"]
 description = "Hical v2.0.0 在所有支持平台上的环境搭建，包括 vcpkg / Conan / 源码编译三种安装方式。"
 +++
 
