@@ -1,13 +1,13 @@
 +++
 title = 'Boost.Beast 学习课程：HTTP 与 WebSocket'
-date = 2026-04-14T03:00:00+08:00
+date = '2026-04-15'
 draft = false
 tags = ["Boost", "Boost.Beast", "HTTP", "WebSocket", "C++", "Hical"]
 categories = ["Boost学习课程"]
 description = "在 Asio 之上构建 HTTP/WebSocket 协议层，学会 Beast 的请求解析、响应构建、Parser 安全限制和 WebSocket 消息循环。"
 +++
 
-> **课程导航**：[学习路径]({{< relref "posts/Boost库学习课程_学习路径导航.md" >}}) | [Boost.System]({{< relref "posts/Boost.System_错误处理基石.md" >}}) | [Boost.Asio]({{< relref "posts/Boost.Asio_异步IO与协程.md" >}}) | **Boost.Beast** | [Boost.JSON]({{< relref "posts/Boost.JSON_序列化与反序列化.md" >}})
+> **课程导航**：[学习路径]({{< relref "posts/Boost库学习课程_学习路径导航.md" >}}) | [Boost.System]({{< relref "posts/Boost.System_错误处理基石.md" >}}) | [Boost.Asio]({{< relref "posts/Boost.Asio_异步IO与协程.md" >}}) | **Boost.Beast** | [Boost.JSON]({{< relref "posts/Boost.JSON_序列化与反序列化.md" >}}) | [Boost.MySQL]({{< relref "posts/Boost.MySQL_异步数据库访问.md" >}})
 
 ## 前置知识
 
@@ -56,6 +56,12 @@ description = "在 Asio 之上构建 HTTP/WebSocket 协议层，学会 Beast 的
   - [练习 3：WebSocket Echo Server](#练习-3websocket-echo-server)
   - [练习 4：Keep-Alive](#练习-4keep-alive)
   - [练习 5（挑战）：静态文件服务器](#练习-5挑战静态文件服务器)
+- [参考答案](#参考答案)
+  - [练习 1 参考答案：基础 HTTP 服务端](#练习-1-参考答案基础-http-服务端)
+  - [练习 2 参考答案：body\_limit 保护](#练习-2-参考答案body_limit-保护)
+  - [练习 3 参考答案：WebSocket Echo Server](#练习-3-参考答案websocket-echo-server)
+  - [练习 4 参考答案：Keep-Alive](#练习-4-参考答案keep-alive)
+  - [练习 5 参考答案：静态文件服务器](#练习-5-参考答案静态文件服务器)
 - [6. 总结与拓展阅读](#6-总结与拓展阅读)
   - [Beast 核心 API 速查表](#beast-核心-api-速查表)
   - [HTTP 请求处理数据流](#http-请求处理数据流)
@@ -214,7 +220,7 @@ int main()
     res.version(11);
     res.set(http::field::content_type, "application/json");
     res.set(http::field::server, "MyServer/1.0");
-    res.body() = R"({"name": "Alice", "age": 30})";
+    res.body() = R"({"name": "Hical", "age": 30})";
     res.prepare_payload();  // 自动设置 Content-Length
 
     std::cout << res << "\n";

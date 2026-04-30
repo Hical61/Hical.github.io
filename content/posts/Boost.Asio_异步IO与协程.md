@@ -1,13 +1,13 @@
 +++
 title = 'Boost.Asio 学习课程：异步 I/O 与协程'
-date = 2026-04-14T02:00:00+08:00
+date = '2026-04-15'
 draft = false
 tags = ["Boost", "Boost.Asio", "协程", "io_context", "C++20", "Hical"]
 categories = ["Boost学习课程"]
 description = "从 io_context 出发，掌握 C++20 协程式异步 I/O，学会 TCP 服务器、定时器和多线程模型，结合 Hical 框架实战解读。"
 +++
 
-> **课程导航**：[学习路径]({{< relref "posts/Boost库学习课程_学习路径导航.md" >}}) | [Boost.System]({{< relref "posts/Boost.System_错误处理基石.md" >}}) | **Boost.Asio** | [Boost.Beast]({{< relref "posts/Boost.Beast_HTTP与WebSocket.md" >}}) | [Boost.JSON]({{< relref "posts/Boost.JSON_序列化与反序列化.md" >}})
+> **课程导航**：[学习路径]({{< relref "posts/Boost库学习课程_学习路径导航.md" >}}) | [Boost.System]({{< relref "posts/Boost.System_错误处理基石.md" >}}) | **Boost.Asio** | [Boost.Beast]({{< relref "posts/Boost.Beast_HTTP与WebSocket.md" >}}) | [Boost.JSON]({{< relref "posts/Boost.JSON_序列化与反序列化.md" >}}) | [Boost.MySQL]({{< relref "posts/Boost.MySQL_异步数据库访问.md" >}})
 
 ## 前置知识
 
@@ -62,6 +62,12 @@ description = "从 io_context 出发，掌握 C++20 协程式异步 I/O，学会
   - [练习 3：多 io\_context 模型](#练习-3多-io_context-模型)
   - [练习 4：SSL Echo Server](#练习-4ssl-echo-server)
   - [练习 5：协程式 HTTP 客户端](#练习-5协程式-http-客户端)
+- [参考答案](#参考答案)
+  - [练习 1 参考答案：协程式 Echo Server](#练习-1-参考答案协程式-echo-server)
+  - [练习 2 参考答案：周期性日志](#练习-2-参考答案周期性日志)
+  - [练习 3 参考答案：多 io\_context 模型](#练习-3-参考答案多-io_context-模型)
+  - [练习 4 参考答案：SSL Echo Server](#练习-4-参考答案ssl-echo-server)
+  - [练习 5 参考答案：协程式 HTTP 客户端](#练习-5-参考答案协程式-http-客户端)
 - [6. 总结与拓展阅读](#6-总结与拓展阅读)
   - [核心 API 速查表](#核心-api-速查表)
   - [三种异步模式对比](#三种异步模式对比)
