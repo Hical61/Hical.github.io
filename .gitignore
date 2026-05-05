@@ -14,6 +14,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# 私密文章源文件（存储在独立私有仓库，CI 构建时拉取）
+content/private/
+
 # Claude Code
 .claude/
 *.swp

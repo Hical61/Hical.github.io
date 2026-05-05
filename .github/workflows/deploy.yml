@@ -28,6 +28,15 @@ jobs:
           submodules: recursive # 关键：递归拉取 PaperMod 主题
           fetch-depth: 0
 
+      - name: 拉取私密文章 (Fetch private content)
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PRIVATE_REPO_DEPLOY_KEY }}" > ~/.ssh/private_deploy_key
+          chmod 600 ~/.ssh/private_deploy_key
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/private_deploy_key -o StrictHostKeyChecking=no"
+          git clone --depth 1 git@github.com:Hical61/hical-blog-private.git content/private
+          rm ~/.ssh/private_deploy_key
+
       - name: 安装 Hugo (Setup Hugo)
         uses: peaceiris/actions-hugo@v3
         with:
