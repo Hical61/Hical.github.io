@@ -1,5 +1,5 @@
 +++
-date = '2026-04-03'
+date = '2025-04-05'
 draft = false
 title = 'DNS 解析 — Resolver、NormalResolver、AresResolver'
 categories = ["网络编程"]
@@ -626,4 +626,4 @@ static GameService service;  // 全局静态对象
 
 ---
 
-*学习日期：2026-04-03 | 上一课：[第15课_TLS安全通信]({{< relref "第15课_TLS安全通信.md" >}}) | 下一课：[第17课_并发工具与对象池]({{< relref "第17课_并发工具与对象池.md" >}})*
+*学习日期：2025-04-05 | 上一课：[第15课_TLS安全通信]({{< relref "第15课_TLS安全通信.md" >}}) | 下一课：[第17课_并发工具与对象池]({{< relref "第17课_并发工具与对象池.md" >}})*

@@ -1497,4 +1497,12 @@ curl http://localhost:8080/admin/log-level
 
 ---
 
+### 系列完结
+
+七篇文章，从第一篇的"为什么用 C++ 写 Web 框架"到这篇的生产级日志系统，我们完整走过了一个现代 C++ Web 框架从架构设计到可观测性的全部环节——协程、内存池、路由、中间件、SSL、反射、Cookie/Session、数据库、日志，每一层都用现代 C++ 特性替代了传统方案里的样板代码和心智负担。
+
+感谢你读到这里。如果这个系列对你有启发，欢迎在 [GitHub](https://github.com/Hical61/Hical.git) 上给个 Star，或者提个 Issue 聊聊你的想法。
+
+---
+
 > **hical** — 基于 C++26 的现代高性能 Web 框架 | [GitHub](https://github.com/Hical61/Hical.git)
