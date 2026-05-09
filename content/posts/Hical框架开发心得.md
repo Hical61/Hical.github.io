@@ -718,6 +718,4 @@ struct ApiResponse
 这些原则不仅适用于 Web 框架开发，也适用于任何需要在性能、可维护性和前瞻性之间做权衡的 C++ 项目。
 
 ---
-
-> **系列导航**：[第一篇：设计理念](01-design-philosophy.md) | [第二篇：协程与内存池](02-coroutine-and-memory.md) | [日志系统指南](09-hical-logging-guide.md) | [协程入门](13-coroutine-getting-started.md)
->
+> 有兴趣可查看 Hical 框架源码地址：[github.com/Hical61/Hical](https://github.com/Hical61/Hical)
