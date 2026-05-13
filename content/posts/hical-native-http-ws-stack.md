@@ -3,7 +3,7 @@ title = 'Hical v2.6.0：移除 Boost.Beast，自研 HTTP/WebSocket 栈全记录'
 date = '2026-05-11'
 draft = false
 tags = ["C++20", "Hical", "HTTP栈", "WebSocket", "picohttpparser", "RFC 6455"]
-categories = ["Hical 框架"]
+categories = ["Hical框架"]
 description = "完整记录 Hical 移除 Boost.Beast、自研零拷贝 HTTP 解析栈和 RFC 6455 WebSocket 实现的工程实践，框架层 CPU 开销从 5.5% 降至 2.5%。"
 +++
 

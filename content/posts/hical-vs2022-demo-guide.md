@@ -3,7 +3,7 @@ title = 'Hical VS2022 快速上手 Demo'
 date = '2026-05-12'
 draft = false
 tags = ["C++20", "Hical", "VS2022", "vcpkg", "快速上手"]
-categories = ["Hical 框架"]
+categories = ["Hical框架"]
 description = "一个最小化的 Hical HTTP Server 示例，VS2022 + vcpkg 编译即跑，含中文 JSON 响应和 WebSocket Echo。"
 +++
 

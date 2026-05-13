@@ -3,7 +3,7 @@ title = 'C++ 也能优雅写 Web？5 分钟用 Hical 搭建 REST API'
 date = '2026-05-04'
 draft = false
 tags = ["C++20", "Hical", "REST API", "Web框架", "快速上手"]
-categories = ["Hical 框架"]
+categories = ["Hical框架"]
 description = "10 行代码启动 HTTP 服务器，40 行代码搞定完整 REST API——用 Hical 框架体验 C++ Web 开发的质变。"
 +++
 
