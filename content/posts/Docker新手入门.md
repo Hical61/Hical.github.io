@@ -1,6 +1,6 @@
 +++
 title = 'Docker 新手入门：从零开始容器化你的应用'
-date = '2025-10-1'
+date = '2025-10-01'
 draft = false
 tags = ["Docker", "容器", "DevOps", "学习笔记", "运维"]
 categories = ["DevOps"]
