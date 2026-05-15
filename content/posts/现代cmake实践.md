@@ -129,11 +129,11 @@ target_link_libraries(myapp PRIVATE mylib)
 
 ### 具体使用场景
 
-| 关键字      | 什么时候用？ | 典型举例 |
-| ----------- | ------------ | -------- |
-| `PRIVATE`   | 这个东西**只出现在我的 .cpp 里**（实现细节） | 你的 .cpp 用了 `#include "detail/impl.h"`，外部不需要知道 |
+| 关键字      | 什么时候用？                                                  | 典型举例                                                                      |
+| ----------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `PRIVATE`   | 这个东西**只出现在我的 .cpp 里**（实现细节）                  | 你的 .cpp 用了 `#include "detail/impl.h"`，外部不需要知道                     |
 | `PUBLIC`    | 这个东西**出现在我的公共 .h 里**（别人 include 我时也得有它） | 你的公共头 `mylib.h` 里写了 `#include <boost/json.hpp>`，外部也得能找到 Boost |
-| `INTERFACE` | 我自己不编译（纯头文件库），只需**告诉使用者**去哪找东西 | header-only 库没有 .cpp，只有头文件 |
+| `INTERFACE` | 我自己不编译（纯头文件库），只需**告诉使用者**去哪找东西      | header-only 库没有 .cpp，只有头文件                                           |
 
 ### 2.1 实战示例：header-only 库
 
@@ -286,10 +286,10 @@ target_link_libraries(myapp PRIVATE
 
 ### 4.1 两种模式（了解即可）
 
-| 模式 | 谁提供查找逻辑？ | 查找的文件名 | 类比 |
-|------|-----------------|-------------|------|
-| **Config 模式** | 库自己安装时附带 | `<Pkg>Config.cmake` | 餐厅自己在地图 App 上注册了地址 |
-| **Module 模式** | CMake 内置或用户写的脚本 | `Find<Pkg>.cmake` | 有人帮餐厅录入了地址 |
+| 模式            | 谁提供查找逻辑？         | 查找的文件名        | 类比                            |
+| --------------- | ------------------------ | ------------------- | ------------------------------- |
+| **Config 模式** | 库自己安装时附带         | `<Pkg>Config.cmake` | 餐厅自己在地图 App 上注册了地址 |
+| **Module 模式** | CMake 内置或用户写的脚本 | `Find<Pkg>.cmake`   | 有人帮餐厅录入了地址            |
 
 **现代做法优先走 Config 模式**——大部分主流库（Boost、Qt、gRPC 等）安装后都自带 Config 文件。你不需要关心具体用的哪种模式，直接 `find_package(Xxx)` 就行。
 
@@ -473,12 +473,12 @@ FetchContent_MakeAvailable(fmt)
 
 ### 5.3 常见坑和注意事项
 
-| 坑 | 说明 | 解决方案 |
-|---|------|---------|
-| 用了 `main` 分支 | 每次配置可能下到不同代码，构建不可复现 | 永远锁定具体 tag 或 commit hash |
-| 配置速度慢 | 每次重新配置都要联网检查 | 设置 `FETCHCONTENT_FULLY_DISCONNECTED=ON` 离线用缓存 |
-| 下载的库"污染"构建 | 有些库的 CMakeLists.txt 写得不好，会注册全局目标或覆盖你的选项 | 加 `EXCLUDE_FROM_ALL` 参数 |
-| 网络环境差 | 公司内网 / CI 环境下载 GitHub 慢 | 配合 mirror 或预下载到本地目录 |
+| 坑                 | 说明                                                           | 解决方案                                             |
+| ------------------ | -------------------------------------------------------------- | ---------------------------------------------------- |
+| 用了 `main` 分支   | 每次配置可能下到不同代码，构建不可复现                         | 永远锁定具体 tag 或 commit hash                      |
+| 配置速度慢         | 每次重新配置都要联网检查                                       | 设置 `FETCHCONTENT_FULLY_DISCONNECTED=ON` 离线用缓存 |
+| 下载的库"污染"构建 | 有些库的 CMakeLists.txt 写得不好，会注册全局目标或覆盖你的选项 | 加 `EXCLUDE_FROM_ALL` 参数                           |
+| 网络环境差         | 公司内网 / CI 环境下载 GitHub 慢                               | 配合 mirror 或预下载到本地目录                       |
 
 ---
 
@@ -577,9 +577,9 @@ ctest --preset dev-gcc
 
 ### 6.3 最佳实践
 
-| 文件 | 是否提交到仓库 | 用途 |
-|------|--------------|------|
-| `CMakePresets.json` | 提交 | 团队共享的官方配置（CI 也用这个） |
+| 文件                    | 是否提交到仓库    | 用途                                       |
+| ----------------------- | ----------------- | ------------------------------------------ |
+| `CMakePresets.json`     | 提交              | 团队共享的官方配置（CI 也用这个）          |
 | `CMakeUserPresets.json` | 加入 `.gitignore` | 个人的本地覆盖（比如你用了特殊编译器路径） |
 
 - 用 `inherits` 实现继承，避免大量重复配置
@@ -605,13 +605,13 @@ ctest --preset dev-gcc
 
 ### 7.1 什么时候需要
 
-| 场景 | 需要 Toolchain 吗？ |
-|------|-------------------|
-| 本机编译本机运行（最常见） | 不需要 |
-| x86 机器编译 ARM 程序 | 需要 |
+| 场景                          | 需要 Toolchain 吗？        |
+| ----------------------------- | -------------------------- |
+| 本机编译本机运行（最常见）    | 不需要                     |
+| x86 机器编译 ARM 程序         | 需要                       |
 | 想用 clang 而不是系统默认 gcc | 可以用（也可以直接设 CXX） |
-| 使用 vcpkg 管理依赖 | 需要（vcpkg 自带一个） |
-| 使用 Conan 2.x 管理依赖 | 需要（Conan 自动生成一个） |
+| 使用 vcpkg 管理依赖           | 需要（vcpkg 自带一个）     |
+| 使用 Conan 2.x 管理依赖       | 需要（Conan 自动生成一个） |
 
 ### 7.2 示例：ARM 交叉编译
 
@@ -1063,12 +1063,12 @@ cmake --build build
 
 ### 11.3 vcpkg vs Conan 怎么选？
 
-| 维度 | vcpkg | Conan |
-|------|-------|-------|
-| 上手难度 | 简单（一个 JSON + 一个环境变量） | 中等（需要 Python + 学 conanfile 语法） |
-| 包数量 | 2000+（微软主力维护） | 更多（社区贡献活跃） |
-| 自定义打包 | 写 portfile（CMake 脚本） | 写 conanfile.py（Python） |
-| 适合场景 | Windows 为主、VS/VSCode 集成好 | 跨平台、CI/CD 集成灵活 |
+| 维度       | vcpkg                            | Conan                                   |
+| ---------- | -------------------------------- | --------------------------------------- |
+| 上手难度   | 简单（一个 JSON + 一个环境变量） | 中等（需要 Python + 学 conanfile 语法） |
+| 包数量     | 2000+（微软主力维护）            | 更多（社区贡献活跃）                    |
+| 自定义打包 | 写 portfile（CMake 脚本）        | 写 conanfile.py（Python）               |
+| 适合场景   | Windows 为主、VS/VSCode 集成好   | 跨平台、CI/CD 集成灵活                  |
 
 ---
 
@@ -1141,16 +1141,16 @@ ctest --test-dir build -C Release --output-on-failure
 
 回顾全文，用一张表把最重要的原则串起来：
 
-| 原则 | 做法 | 对应章节 |
-|------|------|----------|
-| 面向目标 | 所有配置通过 `target_xxx()` 设置，不用全局命令 | 第一章 |
-| 显式传播 | 始终写 `PUBLIC` / `PRIVATE` / `INTERFACE`，不留模糊空间 | 第二章 |
-| 延迟求值 | 需要条件逻辑时用 Generator Expressions，不用 `if()` + 全局变量 | 第三章 |
-| 声明式依赖 | `find_package` + imported targets，不手动拼路径 | 第四章 |
-| 锁定版本 | FetchContent 锁定 tag，vcpkg.json 声明依赖 | 第五、十一章 |
-| 统一配置 | CMakePresets.json 消除"在我这能编译"问题 | 第六章 |
-| 最小暴露 | 默认 `PRIVATE`，只有公共头文件需要的才 `PUBLIC` | 第二章 |
-| 单一来源 | 版本号、编译器选项等只在一处定义，其他地方引用 | 第十章 |
+| 原则       | 做法                                                           | 对应章节     |
+| ---------- | -------------------------------------------------------------- | ------------ |
+| 面向目标   | 所有配置通过 `target_xxx()` 设置，不用全局命令                 | 第一章       |
+| 显式传播   | 始终写 `PUBLIC` / `PRIVATE` / `INTERFACE`，不留模糊空间        | 第二章       |
+| 延迟求值   | 需要条件逻辑时用 Generator Expressions，不用 `if()` + 全局变量 | 第三章       |
+| 声明式依赖 | `find_package` + imported targets，不手动拼路径                | 第四章       |
+| 锁定版本   | FetchContent 锁定 tag，vcpkg.json 声明依赖                     | 第五、十一章 |
+| 统一配置   | CMakePresets.json 消除"在我这能编译"问题                       | 第六章       |
+| 最小暴露   | 默认 `PRIVATE`，只有公共头文件需要的才 `PUBLIC`                | 第二章       |
+| 单一来源   | 版本号、编译器选项等只在一处定义，其他地方引用                 | 第十章       |
 
 ### 如果你只记一件事
 
@@ -1162,13 +1162,13 @@ ctest --test-dir build -C Release --output-on-failure
 
 ## 推荐学习资源
 
-| 资源 | 适合谁 | 说明 |
-|------|--------|------|
-| [It's Time To Do CMake Right](https://pabloariasal.github.io/2018/02/19/its-time-to-do-cmake-right/) | 入门 | 经典短文，20 分钟读完就能理解核心理念 |
-| [More Modern CMake (HSF)](https://hsf-training.github.io/hsf-training-cmake-webpage/) | 入门→进阶 | 交互式教程，有动手练习 |
-| [Effective Modern CMake](https://gist.github.com/mbinna/c61dbb39bca0e4fb7d1f73b0d66a4fd1) | 进阶 | 社区最佳实践清单，适合查阅 |
-| [Professional CMake (Craig Scott)](https://crascit.com/professional-cmake/) | 进阶→专家 | 最权威的 CMake 书籍，覆盖所有细节 |
-| [CMake 官方文档 cmake-buildsystem(7)](https://cmake.org/cmake/help/latest/manual/cmake-buildsystem.7.html) | 参考 | 官方手册，概念解释最准确 |
+| 资源                                                                                                       | 适合谁    | 说明                                  |
+| ---------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------- |
+| [It's Time To Do CMake Right](https://pabloariasal.github.io/2018/02/19/its-time-to-do-cmake-right/)       | 入门      | 经典短文，20 分钟读完就能理解核心理念 |
+| [More Modern CMake (HSF)](https://hsf-training.github.io/hsf-training-cmake-webpage/)                      | 入门→进阶 | 交互式教程，有动手练习                |
+| [Effective Modern CMake](https://gist.github.com/mbinna/c61dbb39bca0e4fb7d1f73b0d66a4fd1)                  | 进阶      | 社区最佳实践清单，适合查阅            |
+| [Professional CMake (Craig Scott)](https://crascit.com/professional-cmake/)                                | 进阶→专家 | 最权威的 CMake 书籍，覆盖所有细节     |
+| [CMake 官方文档 cmake-buildsystem(7)](https://cmake.org/cmake/help/latest/manual/cmake-buildsystem.7.html) | 参考      | 官方手册，概念解释最准确              |
 
 ---
 
