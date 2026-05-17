@@ -1,6 +1,6 @@
 +++
 title = 'Hical 生产部署实践：从编译优化到 Kubernetes 容器化'
-date = '2026-05-12'
+date = '2026-05-17'
 draft = false
 tags = ["C++", "部署", "Docker", "Kubernetes", "Nginx", "性能优化", "Hical"]
 categories = ["Hical框架"]
@@ -99,7 +99,7 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_EXE_LINKER_FLAGS="/LTCG"
 ```
 
-**实测效果**（Hical v2.6.0 bench_server，wrk 10s / 4 线程 / 100 连接）：
+**实测效果**（Hical bench_server，wrk 10s / 4 线程 / 100 连接）：
 
 | 配置            | QPS   | 相对提升 |
 | --------------- | ----- | -------- |
@@ -158,6 +158,8 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
       -DBoost_USE_STATIC_LIBS=ON
 ```
+
+> **`hical_core` 强制为静态库**：移除了 `WINDOWS_EXPORT_ALL_SYMBOLS`，`add_library` 显式声明 `STATIC`，避免 Windows 上模板/inline 符号导出引发的 ABI 不兼容问题。如需通过 `HICAL_USE_SYSTEM_PICOHTTPPARSER=ON` 复用系统已安装的 picohttpparser，picohttpparser 的 include 路径已从 PUBLIC 改为 PRIVATE，不会污染消费者的 include 路径。
 
 ---
 
@@ -257,7 +259,7 @@ server.start();
 
 ### 2.3 多线程与多 acceptor（SO_REUSEPORT）
 
-**v2.6.0 起，Hical 内置了 SO_REUSEPORT 多 acceptor 架构**：每个 worker loop 拥有独立的 acceptor，accept 与 I/O 在同一线程完成，零跨线程调度。这意味着只要设置好 `ioThreads`，框架会自动利用多核优势，不需要额外的多进程部署：
+**Hical 内置了 SO_REUSEPORT 多 acceptor 架构**：每个 worker loop 拥有独立的 acceptor，accept 与 I/O 在同一线程完成，零跨线程调度。这意味着只要设置好 `ioThreads`，框架会自动利用多核优势，不需要额外的多进程部署：
 
 ```cpp
 // 推荐：直接设置 ioThreads = CPU 核数
@@ -267,14 +269,19 @@ HttpServer server(8080, std::thread::hardware_concurrency());
 server.start();
 ```
 
-> **v2.6.0 之前 vs 之后**：
+> **早期版本 vs 当前版本**：
 >
-> | 版本     | accept 模型                       | 跨线程调度       |
-> | -------- | --------------------------------- | ---------------- |
-> | < v2.6.0 | 单 acceptor + round-robin 分发    | 每次 accept 一次 |
-> | v2.6.0+  | 每个 worker loop 独立 acceptor    | 零               |
+> | 版本   | accept 模型                       | 跨线程调度       |
+> | ------ | --------------------------------- | ---------------- |
+> | 早期   | 单 acceptor + round-robin 分发    | 每次 accept 一次 |
+> | 当前   | 每个 worker loop 独立 acceptor    | 零               |
 >
 > 这是 QPS 从 27K 提升到 159K 的主要贡献因素之一。
+>
+> **其他热路径微优化**：
+> - HTTP `Date` 响应头由 `thread_local` 每秒更新一次，符合 RFC 7231 且零热路径开销
+> - `GenericConnection` 写队列 `WriteEntry` 去虚函数化，多处 `alignas(64)` 消除 false sharing
+> - HTTP pipelining 优化：parse-before-read 快速路径 + 延迟 memmove
 
 对于极端场景（需要进程级故障隔离），仍可用多进程模式：
 
@@ -294,7 +301,7 @@ done
 > | 故障隔离 | 一个线程崩全进程挂 | 单进程崩不影响其他 |
 > | 适用场景 | 大多数 Web API 服务 | 需要进程级隔离（如插件系统） |
 >
-> **结论**：v2.6.0 的多 acceptor 架构下，99% 的场景用多线程就够了。
+> **结论**：多 acceptor 架构下，99% 的场景用多线程就够了。
 
 ---
 
@@ -399,6 +406,29 @@ location /ws/ {
     proxy_send_timeout 3600s;
 }
 ```
+
+> **生产 WebSocket 配置要点**：Hical 自研 WebSocket 栈支持心跳保活、自定义关闭码、permessage-deflate 压缩、子协议协商、Binary 消息以及 `WsHub` 广播管理器。生产部署强烈建议在 `WsOptions` 中启用心跳：
+>
+> ```cpp
+> WsOptions wsOpts;
+> wsOpts.pingInterval = std::chrono::seconds(30);   // 30s 发一次 Ping
+> wsOpts.maxMissedPongs = 3;                         // 连续 3 次没 Pong 则断开
+> wsOpts.enableCompression = true;                   // permessage-deflate
+> wsOpts.subprotocols = {"chat.v1"};                 // 子协议协商
+> wsOpts.allowedOrigins = {"https://example.com"};   // CSWSH 防护
+>
+> server.router().ws("/ws/chat", wsOpts,
+>     [](const std::string& msg, WebSocketSession& s) -> Awaitable<void> {
+>         // 文本消息回调（WsMessageCallback 签名）
+>         co_await s.send("echo: " + msg);
+>     });
+>
+> // 如需区分 Text/Binary，可在 onConnect 回调中自行接收 typed message：
+> // auto wsMsg = co_await session.receiveMessage();  // 返回 WsMessage{type, data}
+> // if (wsMsg && wsMsg->type == WsOpcode::hBinary) { ... }
+> ```
+>
+> 多连接广播场景使用 `WsHub`，线程安全的房间/广播管理：`hub.join(id, "room1")`、`hub.broadcast("room1", msg)`、`hub.broadcastBinary(...)`、`hub.sendTo(id, msg)`。Nginx 侧 `proxy_read_timeout` 必须 ≥ `pingInterval × (maxMissedPongs + 1)`，否则 Nginx 会先于心跳超时切断连接。
 
 ### 3.3 SSL 终止策略
 
@@ -563,19 +593,18 @@ void setupProductionLogging()
     logger.setLevel(LogLevel::hInfo);    // 生产环境不要 Debug/Trace
     
     // JSON 格式化器 — 输出 JSON Lines，一行一条日志
-    auto jsonFormatter = std::make_shared<JsonFormatter>();
+    logger.setFormatter(std::make_shared<JsonFormatter>());
     
     // 异步文件 Sink — 双缓冲，不阻塞业务线程
     AsyncFileSink::Options opts;
     opts.file.basePath = "/var/log/hical/app.log";
-    opts.file.maxFileSize = 100 * 1024 * 1024;  // 100MB 轮转
-    opts.file.maxFiles = 10;                     // 保留 10 个归档
-    opts.bufferSize = 4 * 1024 * 1024;           // 4MB 双缓冲
+    opts.file.maxFileSize = 100 * 1024 * 1024;       // 100MB 轮转
+    opts.file.maxFiles = 10;                          // 保留 10 个归档
+    opts.bufferSize = 4 * 1024 * 1024;                // 4MB 双缓冲
+    opts.backpressureLimit = 8 * 1024 * 1024;         // 背压阈值，超出后丢弃 + 计数
+    opts.flushInterval = std::chrono::milliseconds(1000);  // 1s 定时刷盘
     
-    auto sink = std::make_shared<AsyncFileSink>(opts);
-    sink->setFormatter(jsonFormatter);
-    
-    logger.addSink(sink);
+    logger.addSink(std::make_shared<AsyncFileSink>(opts));
 }
 ```
 
@@ -622,11 +651,9 @@ void setupContainerLogging()
     auto& logger = Logger::instance();
     logger.setLevel(LogLevel::hInfo);
     
-    // 容器里直接用 stderr，JSON 格式
-    auto stderrSink = std::make_shared<StderrSink>();
-    stderrSink->setFormatter(std::make_shared<JsonFormatter>());
-    
-    logger.addSink(stderrSink);
+    // 容器里直接用 stderr，JSON 格式（Formatter 设置在 Logger 上，而非 Sink）
+    logger.setFormatter(std::make_shared<JsonFormatter>());
+    logger.addSink(std::make_shared<StderrSink>());
 }
 ```
 
@@ -675,7 +702,7 @@ server.router().get("/health/ready",
                                 {"status", "degraded"},
                                 {"db", "disconnected"}
                             });
-                            res.setStatusCode(HttpStatus::EServiceUnavailable);
+                            res.setStatus(HttpStatusCode::hServiceUnavailable);
                             co_return res;
                         }
                     });
@@ -893,7 +920,7 @@ spec:
     spec:
       containers:
         - name: hical
-          image: registry.example.com/hical-app:v2.6.0
+          image: registry.example.com/hical-app:latest
           ports:
             - containerPort: 8080
           env:
@@ -977,7 +1004,7 @@ spec:
 | 参数           | 默认值 | 调整建议                                          | API                    |
 | -------------- | ------ | ------------------------------------------------- | ---------------------- |
 | IO 线程数      | 1      | CPU 核数（不超过 8）                              | `HttpServer(port, N)`  |
-| 最大连接数     | 10000  | 根据内存预算：每连接约 25KB（v2.6.0 atomic 超时） | `setMaxConnections()`  |
+| 最大连接数     | 10000  | 根据内存预算：每连接约 25KB（含 atomic 时间戳）   | `setMaxConnections()`  |
 | 空闲连接超时   | 60s    | 反向代理后面可设短些（30s）                       | `setIdleTimeout()`     |
 | 最大请求体     | 1MB    | 文件上传场景调大（如 50MB）                       | `setMaxBodySize()`     |
 | 最大请求头     | 8KB    | 含大 Cookie 时调大（如 16KB）                     | `setMaxHeaderSize()`   |
