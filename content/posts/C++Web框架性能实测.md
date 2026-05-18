@@ -367,7 +367,7 @@ Drogon（162K）、Cinatra（156K）、Hical（144K）构成第一梯队（140K-
 | Oat++       | 14.38MiB | 10.52MiB |
 | Hical       | 22.5MiB  | 20.51MiB |
 
-> 数据来自 `docker stats --no-stream`，为容器级 RSS。满载数据在 wrk 同时压测所有框架时采样。Hical 内存占用最高，主要来自 PMR 三层内存池的预分配和 Boost.Asio/Beast 的运行时开销。PMR 池在预分配后实际减少了运行时堆碎片，但静态开销较大。
+> 数据来自 `docker stats --no-stream`，为容器级 RSS。满载数据在 wrk 同时压测所有框架时采样。Hical 内存占用最高，主要来自 PMR 三层内存池的预分配和 Boost.Asio的运行时开销。PMR 池在预分配后实际减少了运行时堆碎片，但静态开销较大。
 
 ### 6.2 二进制 & Docker 镜像大小
 
