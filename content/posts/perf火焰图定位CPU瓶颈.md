@@ -267,7 +267,9 @@ sudo perf script -i perf_after.data > after.txt
 
 ## 五、实战案例：Hical 框架的分析结果
 
-用上面的方法分析我的 C++20/26 Web 框架，得到以下结论：
+用上面的方法分析我的 C++20/26 Web 框架，得到以下结论。
+
+> **注意**：以下火焰图数据采集于优化**之后**。早期版本中 per-request timer 导致每次请求都触发 `epoll_ctl` 注册/注销，占约 12% CPU；改用连接级 atomic 时间戳替代后，该热点已完全消除，不再出现在火焰图中。
 
 ```
 bench_server (100%)
@@ -288,7 +290,7 @@ bench_server (100%)
 1. 框架代码仅占 2% CPU — 效率已经很高
 2. 88% 时间在内核态 — Hello World 场景下正常（真实业务场景会变化）
 3. 没有 `malloc`/`free` 出现在热点 — PMR 内存池生效
-4. `epoll_ctl` 占 12.5% — 来源是 per-request timer，后来用连接级 atomic 时间戳替代，QPS 翻倍
+4. `epoll_ctl` 已从热点中消失 — 早期版本中 per-request timer 导致其占约 12% CPU，改用连接级 atomic 时间戳后彻底消除，这是 27K → 136K QPS 的主要优化点
 
 ---
 
