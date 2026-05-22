@@ -3,7 +3,7 @@ title = '深入学习 Boost.Asio（二）：TCP 编程与多线程模型'
 date = '2026-05-20'
 draft = false
 tags = ["Boost", "Boost.Asio", "C++", "TCP", "多线程", "strand", "协程"]
-categories = ["C++深入学习"]
+categories = ["Boost学习课程"]
 description = "从同步 TCP 到协程异步，一步步构建 Echo Server；深入理解 strand 序列化、多 io_context 线程模型、async_write 与 async_write_some 的区别。"
 +++
 

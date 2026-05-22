@@ -3,7 +3,7 @@ title = '深入学习 Boost.Asio（三）：协程进阶与实战项目'
 date = '2026-05-21'
 draft = false
 tags = ["Boost", "Boost.Asio", "C++", "协程", "C++20", "网络编程", "性能优化"]
-categories = ["C++深入学习"]
+categories = ["Boost学习课程"]
 description = "深入 C++20 协程与 Asio 的结合：超时控制、并发 awaitable、完整聊天室实战项目、性能调优要点与最佳实践总结。"
 +++
 

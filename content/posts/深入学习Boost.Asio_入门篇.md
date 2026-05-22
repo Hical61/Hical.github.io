@@ -3,7 +3,7 @@ title = '深入学习 Boost.Asio（一）：从原理到 io_context'
 date = '2026-05-18'
 draft = false
 tags = ["Boost", "Boost.Asio", "C++", "网络编程", "异步IO", "Proactor"]
-categories = ["C++深入学习"]
+categories = ["Boost学习课程"]
 description = "从操作系统 I/O 模型出发，深入理解 Boost.Asio 的 Proactor 架构、io_context 调度机制、定时器用法，配合大量注释详尽的代码示例。"
 +++
 
