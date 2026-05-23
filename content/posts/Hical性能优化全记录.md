@@ -457,12 +457,12 @@ v2.5: lock { COW shared_ptr atomic_inc × 2 }   临界区 ~10-20ns
 - **优化方案**：取出检查时计入 `m_activeCount`，归还时减回。
 - **优化后效果**：任何时刻都精确追踪连接数，`acquire()` 不会超发。
 
-### WebSocket（v2.6.2-v2.6.3）
+### WebSocket（v2.6.2）
 
 **写串行化**
 
 - **原问题**：`sendFrame()` 可能被多个协程并发调用（消息循环的 `send()` 和 `wsPingLoop` 的 `sendPing()` 同时来）。两个 `async_write` 交错的话 TCP 流上帧就坏了，对面解析出错直接断连。
-- **优化方案**：基于 `steady_timer::cancel_one` 做协程互斥锁（无竞争时 timer 不 arm，零开销）。v2.6.3 改 RAII `WriteGuard`。
+- **优化方案**：基于 `steady_timer::cancel_one` 做协程互斥锁（无竞争时 timer 不 arm，零开销）。v2.6.2 改 RAII `WriteGuard`。
 - **优化后效果**：并发写自动串行化。无竞争 ~0ns（`m_writePending=false` 直接过），有竞争一次 `async_wait`。WriteGuard 保证异常也能释放锁。
 
 **WsHub 广播 cache 友好设计（v2.6.2）**
@@ -471,31 +471,31 @@ v2.5: lock { COW shared_ptr atomic_inc × 2 }   临界区 ~10-20ns
 - **优化方案**：room 改 `vector<RoomMember>`，冗余存 `weak_ptr<WsConnection>`。广播顺序遍历 vector，直接 `lock()` 拿连接，零 map 查找。
 - **优化后效果**：顺序内存访问 cache 友好，消除 N 次 map 查找。`weak_ptr` 自动跳过已断开的连接。
 
-**WsHub 透明哈希（v2.6.3）**
+**WsHub 透明哈希（v2.6.2）**
 
 - **原问题**：`m_rooms` 和 `ConnectionEntry::rooms` 用普通 `unordered_map/set<string>`，调用方传的是 `string_view`，每次 join/leave/broadcast 都要先构造临时 string。`sendTo()` 单目标发送还用了 `make_shared<string>` 共享所有权——只有一个接收者，共享个啥。
 - **优化方案**：容器全改透明哈希，参数全改 `string_view`。`sendTo()` 单目标直接 move string 进 lambda。
 - **优化后效果**：room 操作零临时 string。单目标发送省一次 `make_shared`（控制块 ~32 字节分配+原子计数器）。
 
-**`receiveInternal()` 共用内核（v2.6.3）**
+**`receiveInternal()` 共用内核（v2.6.2）**
 
 - **原问题**：`receive()` 和 `receiveMessage()` 有 ~200 行几乎一样的代码（帧解析、mask、控制帧处理等）。改一处忘另一处，而且两份相同机器码占 icache。
 - **优化方案**：提取 `receiveInternal()` 共用内核，两个 API 传不同的分片策略进去。
 - **优化后效果**：代码量减半，维护统一，icache 占用减少。
 
-**零拷贝 close 帧回复（v2.6.3）**
+**零拷贝 close 帧回复（v2.6.2）**
 
 - **原问题**：回复 close 帧时，把 `m_readBuf` 里已经 unmask 好的 payload 拷贝到新 `std::string` 再传给 `sendCloseFrame()`。数据明明就在 readBuf 里，close 又是连接最后一个操作，完全没必要拷贝。
 - **优化方案**：直接传 `string_view` 引用 readBuf 中的载荷。
 - **优化后效果**：close 握手零额外分配。低频操作，但大量短连接批量断开时有体感。
 
-**`computeWsAcceptKey()` 栈缓冲（v2.6.3）**
+**`computeWsAcceptKey()` 栈缓冲（v2.6.2）**
 
 - **原问题**：WS 握手要把 clientKey（24B）+ GUID（36B）拼起来做 SHA-1。用 `std::string` 拼的话总长 60 字节超过 SSO（MSVC 15B），每次握手必堆分配。
 - **优化方案**：栈上 `char[64]` + `memcpy`，直接传给 SHA-1。
 - **优化后效果**：握手路径省 1 次 malloc/free。大量短连接场景下有意义。
 
-**子协议协商去 vector（v2.6.3）**
+**子协议协商去 vector（v2.6.2）**
 
 - **原问题**：子协议协商先把客户端 offer 解析到 `vector<string_view>` 再嵌套匹配。大多数应用只配 1-2 个协议，建个 vector 再匹配有点杀鸡用牛刀。
 - **优化方案**：边解析边匹配，每解析出一个 token 立即比对，命中就返回。
