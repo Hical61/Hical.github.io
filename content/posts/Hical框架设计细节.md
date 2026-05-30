@@ -1,10 +1,10 @@
 +++
-title: "我用现代 C++ 写了个 Web 框架，这 25 个设计细节让性能拉满"
+title = "我用现代 C++ 写了个 Web 框架，这 25 个设计细节让性能拉满"
 date = '2026-05-30'
 draft = false
 tags = ["C++20", "C++26", "框架设计", "Hical"]
 categories = ["Hical框架"]
-description = "分享 Hical 框架开发中的一些设计细节。"
+description = "从三级 PMR 内存池、Vyukov MPSC 无锁写队列、协程写循环到纵深防御——逐条拆解 Hical 框架 25 个性能与安全设计决策背后的实战考量。"
 +++
 
 ## 写在前面
