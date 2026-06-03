@@ -90,13 +90,13 @@ io_uring 是 Linux 5.1（2019 年）引入的革命性异步 I/O 框架，由 Je
 
 Linux 有一个更早的异步 I/O 接口——`io_submit` / `io_getevents`（POSIX AIO / Linux Native AIO）。它的问题：
 
-| 特性           | Linux AIO          | io_uring                    |
-| -------------- | ------------------ | --------------------------- |
-| 网络支持       | ❌ 仅支持文件       | **✅ 文件 + 网络 + 定时器** |
-| 缓冲 I/O       | ❌ 仅 O_DIRECT      | **✅ 缓冲和直接都支持**     |
-| 真正异步       | ❌ 经常退化为同步   | **✅ 内核线程池保证异步**   |
-| 系统调用开销   | 每次提交一次调用   | **批量提交，可零调用**      |
-| API 复杂度     | 简单但功能有限     | **功能丰富但设计优雅**      |
+| 特性         | Linux AIO        | io_uring                   |
+| ------------ | ---------------- | -------------------------- |
+| 网络支持     | ❌ 仅支持文件     | **✅ 文件 + 网络 + 定时器** |
+| 缓冲 I/O     | ❌ 仅 O_DIRECT    | **✅ 缓冲和直接都支持**     |
+| 真正异步     | ❌ 经常退化为同步 | **✅ 内核线程池保证异步**   |
+| 系统调用开销 | 每次提交一次调用 | **批量提交，可零调用**     |
+| API 复杂度   | 简单但功能有限   | **功能丰富但设计优雅**     |
 
 > io_uring 是 Linux 上**第一个真正意义上的通用异步 I/O 框架**——它能异步完成几乎所有系统调用（read、write、accept、connect、send、recv、openat、close、fsync……）。
 
@@ -288,12 +288,12 @@ int io_uring_register(unsigned int fd,
 
 常用注册操作：
 
-| opcode                         | 作用                               |
-| ------------------------------ | ---------------------------------- |
-| `IORING_REGISTER_BUFFERS`      | 预注册用户缓冲区，避免每次 I/O pin 页 |
-| `IORING_REGISTER_FILES`        | 预注册文件描述符，跳过 fd 查表      |
-| `IORING_REGISTER_RING_FD`      | 注册 ring fd 自身，减少引用计数开销  |
-| `IORING_REGISTER_PBUF_RING`    | 注册 provided buffer ring（内核选缓冲区）|
+| opcode                      | 作用                                      |
+| --------------------------- | ----------------------------------------- |
+| `IORING_REGISTER_BUFFERS`   | 预注册用户缓冲区，避免每次 I/O pin 页     |
+| `IORING_REGISTER_FILES`     | 预注册文件描述符，跳过 fd 查表            |
+| `IORING_REGISTER_RING_FD`   | 注册 ring fd 自身，减少引用计数开销       |
+| `IORING_REGISTER_PBUF_RING` | 注册 provided buffer ring（内核选缓冲区） |
 
 > 预注册是 io_uring 性能优化的关键手段。后续进阶篇会深入讲解。
 
@@ -686,12 +686,12 @@ int main()
 
 假设处理 1000 个就绪连接，每个连接做一次 recv + 一次 send：
 
-| 指标           | epoll                          | io_uring                       |
-| -------------- | ------------------------------ | ------------------------------ |
-| 等待事件       | 1 次 `epoll_wait`             | 0 次（SQPOLL）或 1 次 `enter`  |
-| 提交 I/O       | 2000 次 `recv`/`send`         | **1 次** `io_uring_submit`     |
-| 收割结果       | —（同步返回）                  | 1 次 `io_uring_wait_cqe`      |
-| **合计系统调用** | **2001 次**                    | **1~2 次**                     |
+| 指标             | epoll                 | io_uring                      |
+| ---------------- | --------------------- | ----------------------------- |
+| 等待事件         | 1 次 `epoll_wait`     | 0 次（SQPOLL）或 1 次 `enter` |
+| 提交 I/O         | 2000 次 `recv`/`send` | **1 次** `io_uring_submit`    |
+| 收割结果         | —（同步返回）         | 1 次 `io_uring_wait_cqe`      |
+| **合计系统调用** | **2001 次**           | **1~2 次**                    |
 
 ### 6.2 内存拷贝对比
 
@@ -707,14 +707,14 @@ io_uring + 固定缓冲区：
 
 ### 6.3 何时该用 io_uring？
 
-| 场景                         | 推荐           |
-| ---------------------------- | -------------- |
-| 连接数 < 1000，逻辑简单     | epoll 足够     |
-| 高并发网络服务（C100K+）     | **io_uring**   |
-| 高吞吐文件 I/O（数据库引擎） | **io_uring**   |
-| 需要混合文件 + 网络 I/O      | **io_uring**   |
-| 需要兼容旧内核（< 5.1）     | epoll          |
-| 跨平台（macOS/BSD）          | epoll/kqueue   |
+| 场景                         | 推荐         |
+| ---------------------------- | ------------ |
+| 连接数 < 1000，逻辑简单      | epoll 足够   |
+| 高并发网络服务（C100K+）     | **io_uring** |
+| 高吞吐文件 I/O（数据库引擎） | **io_uring** |
+| 需要混合文件 + 网络 I/O      | **io_uring** |
+| 需要兼容旧内核（< 5.1）      | epoll        |
+| 跨平台（macOS/BSD）          | epoll/kqueue |
 
 ---
 
@@ -722,19 +722,19 @@ io_uring + 固定缓冲区：
 
 io_uring 的特性随内核版本不断扩展：
 
-| 内核版本 | 新增特性                                         |
-| -------- | ------------------------------------------------ |
-| 5.1      | io_uring 首次引入，支持 read/write/fsync          |
-| 5.4      | `IORING_OP_TIMEOUT`、`IORING_OP_ACCEPT`          |
-| 5.5      | `IORING_OP_RECV` / `SEND`、SQ 轮询（SQPOLL）     |
-| 5.6      | `io_uring_register` 预注册缓冲区                  |
-| 5.7      | Linked SQE（链式操作）                            |
-| 5.10     | `IORING_OP_SHUTDOWN`、固定文件表更新               |
-| 5.13     | `IORING_OP_RENAMEAT` / `MKDIRAT` 等文件系统操作   |
-| 5.19     | Multishot accept / recv、provided buffers ring     |
+| 内核版本 | 新增特性                                                  |
+| -------- | --------------------------------------------------------- |
+| 5.1      | io_uring 首次引入，支持 read/write/fsync                  |
+| 5.4      | `IORING_OP_TIMEOUT`、`IORING_OP_ACCEPT`                   |
+| 5.5      | `IORING_OP_RECV` / `SEND`、SQ 轮询（SQPOLL）              |
+| 5.6      | `io_uring_register` 预注册缓冲区                          |
+| 5.7      | Linked SQE（链式操作）                                    |
+| 5.10     | `IORING_OP_SHUTDOWN`、固定文件表更新                      |
+| 5.13     | `IORING_OP_RENAMEAT` / `MKDIRAT` 等文件系统操作           |
+| 5.19     | Multishot accept / recv、provided buffers ring            |
 | 6.0      | `IORING_SETUP_COOP_TASKRUN`、`IORING_SETUP_SINGLE_ISSUER` |
-| 6.1      | `io_uring_cmd`（设备自定义命令）                   |
-| **6.7+** | **Zero-copy send**、增强的 provided buffers        |
+| 6.1      | `io_uring_cmd`（设备自定义命令）                          |
+| **6.7+** | **Zero-copy send**、增强的 provided buffers               |
 
 > **建议**：生产环境至少使用 **5.19+** 内核以获得 multishot 和 provided buffers 支持——这是网络编程场景的关键优化。
 
@@ -742,15 +742,15 @@ io_uring 的特性随内核版本不断扩展：
 
 ## 本篇小结
 
-| 概念               | 要点                                                            |
-| ------------------ | --------------------------------------------------------------- |
-| io_uring 定位      | Linux 第四代 I/O 框架，统一文件/网络异步操作                      |
-| 双环形缓冲区       | SQ（用户→内核）+ CQ（内核→用户），共享内存 mmap，无锁设计        |
-| SQE                | 描述一个 I/O 请求：opcode + fd + buffer + user_data              |
-| CQE                | 描述一个完成结果：user_data + res（成功为字节数，失败为负 errno） |
-| user_data          | 异步模型的灵魂，用于关联请求和完成                               |
-| 批量提交           | 多个 SQE 一次 submit，大幅减少系统调用                           |
-| liburing           | 官方 C 封装库，提供 prep/submit/wait 系列函数                    |
-| 三大系统调用        | `io_uring_setup` + `io_uring_enter` + `io_uring_register`       |
+| 概念          | 要点                                                              |
+| ------------- | ----------------------------------------------------------------- |
+| io_uring 定位 | Linux 第四代 I/O 框架，统一文件/网络异步操作                      |
+| 双环形缓冲区  | SQ（用户→内核）+ CQ（内核→用户），共享内存 mmap，无锁设计         |
+| SQE           | 描述一个 I/O 请求：opcode + fd + buffer + user_data               |
+| CQE           | 描述一个完成结果：user_data + res（成功为字节数，失败为负 errno） |
+| user_data     | 异步模型的灵魂，用于关联请求和完成                                |
+| 批量提交      | 多个 SQE 一次 submit，大幅减少系统调用                            |
+| liburing      | 官方 C 封装库，提供 prep/submit/wait 系列函数                     |
+| 三大系统调用  | `io_uring_setup` + `io_uring_enter` + `io_uring_register`         |
 
 下一篇 [进阶篇]({{< relref "posts/深入学习io_uring_进阶篇.md" >}}) 将深入高级特性（SQPOLL、Fixed Buffers、Linked SQE）和 TCP 网络编程。

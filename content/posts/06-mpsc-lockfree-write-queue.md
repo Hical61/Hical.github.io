@@ -617,14 +617,14 @@ send(data)
 
 ## 八、对比传统方案
 
-| 维度 | mutex + buffer | MPSC 无锁队列 |
-|------|:---:|:---:|
-| 生产者（send）阻塞？ | 会（等锁） | 不会（wait-free） |
-| 锁竞争 | O(N) 个生产者争一把锁 | 只有 tail_ 的 exchange（极轻量） |
-| 内存分配 | 每次 send 可能触发 buffer 扩容 | 节点池 O(1) 取还 |
-| 系统调用 | 每条消息一次 write | 批量 scatter-gather，一次 writev |
-| 代码复杂度 | 低 | 中（需理解无锁语义） |
-| 适用场景 | 低并发、简单场景 | 高并发、每连接高吞吐 |
+| 维度                 |         mutex + buffer         |          MPSC 无锁队列           |
+| -------------------- | :----------------------------: | :------------------------------: |
+| 生产者（send）阻塞？ |           会（等锁）           |        不会（wait-free）         |
+| 锁竞争               |     O(N) 个生产者争一把锁      | 只有 tail_ 的 exchange（极轻量） |
+| 内存分配             | 每次 send 可能触发 buffer 扩容 |         节点池 O(1) 取还         |
+| 系统调用             |       每条消息一次 write       | 批量 scatter-gather，一次 writev |
+| 代码复杂度           |               低               |       中（需理解无锁语义）       |
+| 适用场景             |        低并发、简单场景        |       高并发、每连接高吞吐       |
 
 ---
 
@@ -713,12 +713,12 @@ MPSC 队列中 push 是 wait-free 的——**你永远不需要等任何人**。
 
 Hical 的发送引擎是一个精心设计的多层系统：
 
-| 层次 | 职责 | 核心优化 |
-|------|------|---------|
-| StringPool | 提供发送缓冲区 | thread_local 对象池，零 malloc |
-| MpscNodePool | 提供队列节点 | thread_local free list，零 malloc |
-| MpscQueue | 多生产者→单消费者 | Vyukov 算法，wait-free push |
-| writeLoop | 批量取出 + 发送 | scatter-gather I/O，一次系统调用 |
+| 层次         | 职责              | 核心优化                          |
+| ------------ | ----------------- | --------------------------------- |
+| StringPool   | 提供发送缓冲区    | thread_local 对象池，零 malloc    |
+| MpscNodePool | 提供队列节点      | thread_local free list，零 malloc |
+| MpscQueue    | 多生产者→单消费者 | Vyukov 算法，wait-free push       |
+| writeLoop    | 批量取出 + 发送   | scatter-gather I/O，一次系统调用  |
 
 四层协作的结果是：在高并发场景下，`send()` 的热路径上没有锁、没有 malloc、没有系统调用。数据被异步批量发送，最大化网络吞吐。
 

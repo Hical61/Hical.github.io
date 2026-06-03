@@ -573,13 +573,13 @@ int main()
   // 编译器自动管理协程帧的状态
 ```
 
-| 维度             | 回调/状态机                        | **协程**                         |
-| ---------------- | ---------------------------------- | -------------------------------- |
-| 代码可读性       | 分散在多个 case 中                 | **线性，像同步代码**             |
-| 状态管理         | 手动维护 `eventType`              | **编译器自动管理协程帧**         |
-| 错误处理         | 每个回调独立检查                   | **try/catch 或检查返回值**       |
-| 性能             | 极致（无额外开销）                 | **接近回调**（协程帧分配可优化） |
-| 适合场景         | 极端性能或简单协议                 | **复杂协议，生产代码**           |
+| 维度       | 回调/状态机          | **协程**                         |
+| ---------- | -------------------- | -------------------------------- |
+| 代码可读性 | 分散在多个 case 中   | **线性，像同步代码**             |
+| 状态管理   | 手动维护 `eventType` | **编译器自动管理协程帧**         |
+| 错误处理   | 每个回调独立检查     | **try/catch 或检查返回值**       |
+| 性能       | 极致（无额外开销）   | **接近回调**（协程帧分配可优化） |
+| 适合场景   | 极端性能或简单协议   | **复杂协议，生产代码**           |
 
 ---
 
@@ -857,12 +857,12 @@ void gracefulShutdownPhase3(IoUring& ring)
   └─────────────────────────────────────────────┘
 ```
 
-| 方案                      | 性能     | 跨平台 | 生态         | 控制力   |
-| ------------------------- | -------- | ------ | ------------ | -------- |
-| 直接 io_uring + liburing  | **极致** | ❌      | 需自建       | **完全** |
-| Boost.Asio + epoll 后端   | 优秀     | **✅**  | **丰富**     | 中等     |
-| **Boost.Asio + io_uring** | **极致** | **✅**  | **丰富**     | 中等     |
-| libev / libuv             | 良好     | **✅**  | 中等         | 低       |
+| 方案                      | 性能     | 跨平台 | 生态     | 控制力   |
+| ------------------------- | -------- | ------ | -------- | -------- |
+| 直接 io_uring + liburing  | **极致** | ❌      | 需自建   | **完全** |
+| Boost.Asio + epoll 后端   | 优秀     | **✅**  | **丰富** | 中等     |
+| **Boost.Asio + io_uring** | **极致** | **✅**  | **丰富** | 中等     |
+| libev / libuv             | 良好     | **✅**  | 中等     | 低       |
 
 > **Hical 框架的选择**：Hical 使用 Boost.Asio 作为异步框架，在 Linux 上通过 `-DBOOST_ASIO_HAS_IO_URING` 启用 io_uring 后端——既享受 Asio 的协程生态和跨平台能力，又获得 io_uring 的内核级性能。
 
@@ -905,16 +905,16 @@ io_uring 知识体系
 
 ## 本篇小结
 
-| 概念                 | 要点                                                              |
-| -------------------- | ----------------------------------------------------------------- |
-| RAII 封装            | IoUring 类自动管理 init/exit，getSqe 自动 submit 防 SQ 满          |
-| IoUringAwaitable     | 将 `coroutine_handle` 编码到 `user_data`，CQE 就绪时恢复协程       |
-| Task\<T\>            | 最小化协程类型，lazy start + final_suspend                          |
-| 协程 Echo Server     | `co_await asyncRecv / asyncSend`，代码像同步一样线性                |
-| 批量策略             | 先填充所有 SQE 再一次 submit；收割时 peek 处理所有就绪 CQE          |
-| 内存池               | 对象池避免高频 malloc/free，两个数量级的延迟差异                     |
-| 多 ring 架构         | 每线程独享 io_uring，绑定 CPU，eventfd 跨线程唤醒                    |
-| Asio + io_uring      | `-DBOOST_ASIO_HAS_IO_URING` 在 Asio 框架下启用 io_uring 后端       |
+| 概念             | 要点                                                         |
+| ---------------- | ------------------------------------------------------------ |
+| RAII 封装        | IoUring 类自动管理 init/exit，getSqe 自动 submit 防 SQ 满    |
+| IoUringAwaitable | 将 `coroutine_handle` 编码到 `user_data`，CQE 就绪时恢复协程 |
+| Task\<T\>        | 最小化协程类型，lazy start + final_suspend                   |
+| 协程 Echo Server | `co_await asyncRecv / asyncSend`，代码像同步一样线性         |
+| 批量策略         | 先填充所有 SQE 再一次 submit；收割时 peek 处理所有就绪 CQE   |
+| 内存池           | 对象池避免高频 malloc/free，两个数量级的延迟差异             |
+| 多 ring 架构     | 每线程独享 io_uring，绑定 CPU，eventfd 跨线程唤醒            |
+| Asio + io_uring  | `-DBOOST_ASIO_HAS_IO_URING` 在 Asio 框架下启用 io_uring 后端 |
 
 ---
 

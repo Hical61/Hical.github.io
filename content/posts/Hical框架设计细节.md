@@ -53,11 +53,11 @@ option(HICAL_WITH_DATABASE "Enable DB middleware" OFF)
 
 这是我觉得框架里最值得细说的设计。内存分配分三层：
 
-| 层级 | 谁的生命周期 | 策略 |
-|------|-------------|------|
-| 全局池 | 进程级 | `synchronized_pool_resource`，线程安全 |
-| 线程本地池 | 线程级 | `unsynchronized_pool_resource`，无锁 |
-| 请求级缓冲 | 单次请求 | `monotonic_buffer_resource`，只进不出 |
+| 层级       | 谁的生命周期 | 策略                                   |
+| ---------- | ------------ | -------------------------------------- |
+| 全局池     | 进程级       | `synchronized_pool_resource`，线程安全 |
+| 线程本地池 | 线程级       | `unsynchronized_pool_resource`，无锁   |
+| 请求级缓冲 | 单次请求     | `monotonic_buffer_resource`，只进不出  |
 
 关键细节在于：请求级缓冲的上游指向线程本地池而不是全局池。这意味着即使请求级缓冲需要扩容，走的也是无锁路径。
 
