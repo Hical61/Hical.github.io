@@ -482,24 +482,35 @@ function EnumerateGlobals()
 end
 
 -- 估算对象大小（粗略）
-function estimate_size(obj)
+function estimate_size(obj, seen, depth, counted_strings)
+	seen = seen or {}  -- 记录已访问过的 table
+	counted_strings = counted_strings or {}  -- 全局字符串去重
+	depth = depth or 0
+	if depth > 128 then return 0 end -- 限制深度
+	
     local obj_type = type(obj)
-    if obj_type == "number" then return 8 end
-    if obj_type == "boolean" then return 1 end
-    if obj_type == "string" then return #obj + 24 end  -- 字符串本身 + 头部开销
+    if obj_type == "number" then return 0 end -- 数字不计，因为 Lua 常驻/共享
+    if obj_type == "boolean" then return 0 end
+    if obj_type == "string" then
+		-- 字符串只算一次
+        if counted_strings[obj] then return 0 end
+        counted_strings[obj] = true
+		return #obj + 56 -- 字符串本身 + 头部开销
+	end  
+	
     if obj_type == "table" then
+		if seen[obj] then return 0 end  -- 已访问过，不再重复计算
+        seen[obj] = true
+		
         -- 递归估算 Table 大小
-        local size = 56  -- Table 头部
-        local count = 0
+        local size = 80  -- Table 头部
         for k, v in pairs(obj) do
-            count = count + 1
-            if count > 100 then break end  -- 限制深度
-            size = size + estimate_size(k) + estimate_size(v)
+            size = size + estimate_size(k, seen, depth + 1, counted_strings) + estimate_size(v, seen, depth + 1, counted_strings)
         end
         return size
     end
-    if obj_type == "function" then return 72 end  -- 闭包大小约
-    if obj_type == "thread" then return 4096 end  -- 协程默认栈
+    if obj_type == "function" then return 144 end  -- 闭包大小约
+    if obj_type == "thread" then return 12288 end  -- 协程默认栈 ~12KB
     return 32
 end
 ```
