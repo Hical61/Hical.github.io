@@ -1186,7 +1186,7 @@ jobs:
 
 ## 十、Windows 平台工具链
 
-> 原文以 Linux + perf 为主线，但大量 C++ 服务器团队（含本项目）使用 Windows + MSVC 开发。本节补齐 Windows 生态的核心工具，覆盖开发期与生产期。
+> 大量 C++ 服务器团队使用 Windows + MSVC 开发。本节补齐 Windows 生态的核心工具，覆盖开发期与生产期。
 
 ### 10.1 Windows 性能工具全景
 
